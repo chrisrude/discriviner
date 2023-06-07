@@ -13,9 +13,9 @@ impl Discrivener {
         event_callback: std::sync::Arc<dyn Fn(api_types::VoiceChannelEvent) + Send + Sync>,
         dump_everything_to_a_file: Option<String>,
     ) -> Self {
-        return Discrivener {
+        Discrivener {
             model: crate::model::Model::load(model_path, dump_everything_to_a_file, event_callback),
-        };
+        }
     }
 
     /// Connect to a voice channel.
@@ -49,7 +49,7 @@ impl Discrivener {
             token: voice_token.to_string(),
             user_id: UserId::from(user_id),
         };
-        return self.model.connect(connection_info).await;
+        self.model.connect(connection_info).await
     }
 
     pub fn disconnect(&mut self) {

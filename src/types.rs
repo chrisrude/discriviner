@@ -80,11 +80,7 @@ impl MyVoiceData {
 impl api_types::ConnectData {
     pub fn from(other: &songbird::events::context_data::ConnectData) -> Self {
         Self {
-            channel_id: if let Some(id) = other.channel_id {
-                Some(id.0)
-            } else {
-                None
-            },
+            channel_id: other.channel_id.map(|id| id.0),
             guild_id: other.guild_id.0,
             session_id: other.session_id.clone().to_string(),
             server: other.server.clone().to_string(),
@@ -132,16 +128,8 @@ impl api_types::DisconnectData {
     pub fn from(other: &songbird::events::context_data::DisconnectData) -> Self {
         Self {
             kind: api_types::DisconnectKind::from(&other.kind),
-            reason: if let Some(reason) = &other.reason {
-                Some(api_types::DisconnectReason::from(reason))
-            } else {
-                None
-            },
-            channel_id: if let Some(id) = other.channel_id {
-                Some(id.0)
-            } else {
-                None
-            },
+            reason: other.reason.as_ref().map(api_types::DisconnectReason::from),
+            channel_id: other.channel_id.map(|id| id.0),
             guild_id: other.guild_id.0,
             session_id: other.session_id.clone().to_string(),
         }
@@ -174,7 +162,7 @@ impl MyEventContext {
     pub fn from(other: &songbird::EventContext) -> Option<Self> {
         match other {
             songbird::EventContext::SpeakingStateUpdate(s) => {
-                Some(Self::SpeakingStateUpdate(s.clone()))
+                Some(Self::SpeakingStateUpdate(*s))
             }
             songbird::EventContext::SpeakingUpdate(s) => {
                 Some(Self::SpeakingUpdate(MySpeakingUpdateData::from(s)))
@@ -186,7 +174,7 @@ impl MyEventContext {
                     );
                     return None;
                 }
-                if 0 == s.audio.as_ref().unwrap().len() {
+                if s.audio.as_ref().unwrap().is_empty() {
                     eprintln!("RTP packet, but 0 bytes of audio. Packet received out-of-order.");
                     return None;
                 }

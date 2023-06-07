@@ -6,8 +6,8 @@ use std::sync::Arc;
 use tokio::signal;
 
 fn on_text(message: api_types::TranscribedMessage, log_performance: bool) {
-    if message.text_segments.len() == 0 {
-        println!("");
+    if message.text_segments.is_empty() {
+        println!();
         return;
     }
     if log_performance {
@@ -23,9 +23,8 @@ fn on_text(message: api_types::TranscribedMessage, log_performance: bool) {
     for text_segment in message.text_segments {
         if first {
             println!(
-                "{}{} {}",
+                "{} says: {}",
                 message.user_id.to_string().bright_green(),
-                " says:",
                 text_segment.text.bold(),
             );
             first = false;

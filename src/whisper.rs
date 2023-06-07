@@ -34,11 +34,11 @@ impl LastTranscriptionData {
             .collect::<Vec<_>>()
             .concat();
 
-        return LastTranscriptionData {
+        LastTranscriptionData {
             tokens,
             timestamp: end_timestmap,
             user_id: message.user_id,
-        };
+        }
     }
 }
 
@@ -56,7 +56,7 @@ fn make_params() -> FullParams<'static, 'static> {
     params.set_print_realtime(false);
     params.set_print_timestamps(false);
 
-    return params;
+    params
 }
 
 impl Whisper {
@@ -78,11 +78,11 @@ impl Whisper {
 
         let last_transcription = Arc::new(Mutex::new(None));
 
-        return Self {
+        Self {
             event_callback,
             last_transcription,
             whisper_context,
-        };
+        }
     }
 
     /// Called once we have a full audio clip from a user.
@@ -103,7 +103,7 @@ impl Whisper {
             .as_secs();
 
         // make clones of everything so that the closure can own them, if
-        let audio_copy = audio.clone();
+        let audio_copy = audio;
         let callback_copy = self.event_callback.clone();
         let last_transcription_copy = self.last_transcription.clone();
         let whisper_context_copy = self.whisper_context.clone();
@@ -123,10 +123,8 @@ impl Whisper {
                 let last_transcription = last_transcription_copy.lock().await;
                 let lt = last_transcription.clone();
                 if let Some(last_transcription) = lt {
-                    if (unixsecs - last_transcription.timestamp) < 5 {
-                        if last_transcription.user_id == user_id {
-                            last_transcription_context = Some(last_transcription);
-                        }
+                    if (unixsecs - last_transcription.timestamp) < 5 && last_transcription.user_id == user_id {
+                        last_transcription_context = Some(last_transcription);
                     }
                 }
             }
@@ -137,7 +135,7 @@ impl Whisper {
             );
 
             // if there's nothing in the last transcription, then just stop
-            if text_segments.len() == 0 {
+            if text_segments.is_empty() {
                 return;
             }
 
@@ -218,7 +216,7 @@ fn resample_audio_from_discord_to_whisper(
     for sample in audio_out.iter_mut() {
         *sample /= audio_max;
     }
-    return audio_out;
+    audio_out
 }
 
 /// ctx came from load_model
@@ -254,5 +252,5 @@ fn audio_to_text(
             end_offset_ms: state.full_get_segment_t1(i).unwrap() as u32,
         });
     }
-    return result;
+    result
 }

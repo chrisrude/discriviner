@@ -109,7 +109,7 @@ impl PacketHandler {
 
         self._fire_callback(api_types::VoiceChannelEvent::UserJoin(
             api_types::UserJoinData {
-                user_id: user_id,
+                user_id,
                 joined: false,
             },
         ));
@@ -134,8 +134,8 @@ impl PacketHandler {
     fn _with_ssrc(&self, ssrc: types::Ssrc, f: impl FnOnce(&mut voice_buffer::VoiceBufferForUser)) {
         let buffer_mutex = self.ssrc_to_user_voice_data.clone();
         let mut ssrc_to_voice_buffer = buffer_mutex.lock().unwrap();
-        if let Some(mut user_voice_data) = ssrc_to_voice_buffer.get_mut(&ssrc) {
-            f(&mut user_voice_data);
+        if let Some(user_voice_data) = ssrc_to_voice_buffer.get_mut(&ssrc) {
+            f(user_voice_data);
         } else {
             // This is used when we're first starting to suppress errors
             // from users who were talking before we joined the channel.
@@ -230,7 +230,7 @@ impl PacketHandler {
                     if let Some(user_id) = user_id {
                         let callback = self.audio_complete_callback.clone();
                         // we need to copy this so it has an independent lifetime
-                        let user_id_copy = user_id.0.clone();
+                        let user_id_copy = user_id.0;
                         self.on_user_join(
                             *ssrc,
                             user_id.0,

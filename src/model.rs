@@ -59,17 +59,17 @@ impl Model {
         );
         model.driver.add_global_event(
             songbird::CoreEvent::DriverReconnect.into(),
-            VoicePacketHandlerWrapper::new(handler_arc.clone()),
+            VoicePacketHandlerWrapper::new(handler_arc),
         );
 
-        return model;
+        model
     }
 
     pub async fn connect(
         &mut self,
         connection_info: songbird::ConnectionInfo,
     ) -> Result<(), songbird::error::ConnectionError> {
-        return self.driver.connect(connection_info).await;
+        self.driver.connect(connection_info).await
     }
 
     pub fn disconnect(&mut self) {
