@@ -1,7 +1,14 @@
-pub mod api;
-pub mod api_types;
-mod model;
+mod api {
+    pub mod api;
+    pub mod api_types;
+}
+mod model {
+    pub(crate) mod audio_buffer;
+    pub(crate) mod call_attendance;
+    pub(crate) mod transcript;
+    pub(crate) mod types;
+    pub(crate) mod voice_activity;
+}
+mod old_model;
 mod packet_handler;
-mod types;
-mod voice_buffer;
 mod whisper;

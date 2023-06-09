@@ -1,11 +1,12 @@
-use crate::types;
+use crate::model::types;
 use ringbuf::{Consumer, Producer};
 use std::sync::Arc;
 use std::sync::Mutex;
+use tokio::sync;
 
 type AudioBuffer = ringbuf::HeapRb<types::AudioSample>;
 
-struct VoiceBuffer {
+pub(crate) struct VoiceBuffer {
     // store 30 seconds of audio, 16-bit stereo PCM at 48kHz
     // divided into 20ms chunks
 
@@ -14,12 +15,11 @@ struct VoiceBuffer {
     // decoded.
     buffer_mutex: Arc<Mutex<AudioBuffer>>,
 
-    // function to call when a buffer is full
-    on_buffer_full_fn: types::AudioCallback,
+    receiver: sync::mpsc::Receiver<Vec<types::MyVoiceData>>,
 }
 
 impl<'a> VoiceBuffer {
-    fn new(callback: types::AudioCallback) -> Self {
+    pub(crate) fn new(callback: types::AudioCallback) -> Self {
         let buffer = AudioBuffer::new(types::AUDIO_BUFFER_SIZE);
 
         Self {
@@ -40,46 +40,9 @@ impl<'a> VoiceBuffer {
         let mut buffer = m.lock().unwrap();
         let (mut producer, consumer) = buffer.split_ref();
 
-        if producer.free_len() < audio.len() {
-            self._flush_buffer(&producer, consumer);
-        }
+        if producer.free_len() < audio.len() {}
 
         producer.push_slice(audio.as_slice());
-    }
-
-    /// Flush the buffer, calling the callback.
-    /// This should consume everything in the buffer.
-    fn flush_buffer(&self) {
-        let mut buffer = self.buffer_mutex.lock().unwrap();
-        let (producer, consumer) = buffer.split_ref();
-        if consumer.is_empty() {
-            return;
-        }
-        self._flush_buffer(&producer, consumer);
-    }
-
-    /// we've filled up a buffer, so we need to send it to decoding.
-    /// we'll swap the buffers, so that we can continue to fill the
-    /// other buffer while we're decoding this one.
-    /// Must be called with the buffer lock held.
-    fn _flush_buffer(
-        &self,
-        producer: &Producer<types::AudioSample, &'a AudioBuffer>,
-        mut consumer: Consumer<types::AudioSample, &'a AudioBuffer>,
-    ) {
-        let buffer_contents = consumer.pop_iter().collect::<Vec<_>>();
-        let audio = Arc::new(buffer_contents);
-
-        // the user ID passed from voice_buffer is always 0, since
-        // we don't know it.  The packet handler will get this
-        // callback and inject it.
-        (self.on_buffer_full_fn)(0, audio);
-
-        // make sure that iter is empty.  If the callback didn't do it,
-        // we'll do it here.
-        if !producer.is_empty() {
-            eprintln!("iter should be empty");
-        }
     }
 }
 
@@ -117,6 +80,5 @@ impl VoiceBufferForUser {
 
     pub fn on_stop_talking(&mut self) {
         self.speaking = false;
-        self.buffer.flush_buffer();
     }
 }

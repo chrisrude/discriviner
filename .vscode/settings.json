@@ -1,0 +1,14 @@
+{
+    "cSpell.words": [
+        "discrivener",
+        "downsampler",
+        "downsamples",
+        "ringbuf",
+        "ssid",
+        "Ssrc"
+    ],
+    "rust-analyzer.linkedProjects": [
+        "./Cargo.toml",
+        "./Cargo.toml"
+    ]
+}

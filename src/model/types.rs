@@ -161,9 +161,7 @@ pub enum MyEventContext {
 impl MyEventContext {
     pub fn from(other: &songbird::EventContext) -> Option<Self> {
         match other {
-            songbird::EventContext::SpeakingStateUpdate(s) => {
-                Some(Self::SpeakingStateUpdate(*s))
-            }
+            songbird::EventContext::SpeakingStateUpdate(s) => Some(Self::SpeakingStateUpdate(*s)),
             songbird::EventContext::SpeakingUpdate(s) => {
                 Some(Self::SpeakingUpdate(MySpeakingUpdateData::from(s)))
             }
