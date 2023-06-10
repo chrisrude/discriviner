@@ -492,6 +492,7 @@ dependencies = [
  "serde_with",
  "songbird",
  "tokio",
+ "tokio-util",
  "whisper-rs",
 ]
 

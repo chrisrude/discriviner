@@ -27,13 +27,9 @@ pub const AUDIO_BUFFER_SIZE: usize =
 
 pub type AudioSample = i16;
 pub type AudioClip = Arc<Vec<AudioSample>>;
-pub type UserId = u64;
 pub type Ssrc = u32;
 
-pub type AudioCallback = std::sync::Arc<dyn Fn(UserId, AudioClip) + Sync + Send>;
-
 pub const WHISPER_SAMPLES_PER_SECOND: usize = 16000;
-pub type WhisperAudioSample = f32;
 
 /// These types shadow the ones in the songbird crate.
 /// We need to do this because we want to serialize them,

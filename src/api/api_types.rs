@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
+pub type WhisperAudioSample = f32;
+pub type UserId = u64;
+
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, Serialize, Deserialize)]
 pub struct UserJoinData {
     /// Sent when a user joins or leaves.
@@ -42,9 +45,6 @@ pub struct TextSegment {
     /// When the audio for this segment ended.
     /// Time is relative to when the Message was received.
     pub end_offset_ms: u32,
-
-    // todo: where to put this?
-    pub(crate) tokens: Vec<i32>,
 }
 
 #[serde_as]
@@ -163,4 +163,15 @@ pub enum VoiceChannelEvent {
     Reconnect(ConnectData),
     Disconnect(DisconnectData),
     VoiceActivity(VoiceActivityData),
+}
+
+impl TranscribedMessage {
+    pub(crate) fn all_text(&self) -> String {
+        let mut result = String::new();
+        for segment in &self.text_segments {
+            result.push_str(&segment.text);
+            result.push_str(" ")
+        }
+        result
+    }
 }

@@ -1,88 +1,84 @@
 use crate::api::api_types;
 use std::collections;
+use std::sync::Arc;
+use std::sync::Mutex;
 use tokio::sync;
 use tokio::task;
-
-#[derive(Clone, Eq, PartialEq)]
-struct RecentTokens {
-    created_at: u64,
-    tokens: Vec<i32>,
-}
-
-// we want the oldest token to be popped first, so
-// intentionally reverse the ordering
-impl Ord for RecentTokens {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        other
-            .created_at
-            .cmp(&self.created_at)
-            .then_with(|| other.tokens.cmp(&self.tokens))
-    }
-}
-
-// BinaryHeap is a max-heap, so implement the most recent
-// token should have the smallest value
-impl PartialOrd for RecentTokens {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        other.created_at.partial_cmp(&self.created_at)
-    }
-}
-
-impl RecentTokens {
-    fn from(transcribed_message: api_types::TranscribedMessage) -> Self {
-        let tokens = transcribed_message
-            .text_segments
-            .iter()
-            .map(|segment| segment.tokens)
-            .flatten()
-            .collect();
-        Self {
-            created_at: transcribed_message.timestamp,
-            tokens,
-        }
-    }
-}
 
 /// Input:
 ///  - finalized text segments
 /// Output:
-///  - when queried, most recent 1024 tokens?
-struct Transcript(collections::BinaryHeap<RecentTokens>);
-
-/// max number of tokens to produce
-const NUM_TOKENS: usize = 1024;
-
-/// number of messages to keep
-const NUM_MESSAGES: usize = 10;
+///  - when queried, most recent lines of text
+struct Transcript(collections::BinaryHeap<api_types::TranscribedMessage>);
 
 impl Transcript {
-    pub(crate) fn monitor(
-        rxQueue: sync::mpsc::Receiver<api_types::TranscribedMessage>,
-    ) -> task::JoinHandle<()> {
-        let transcript = Self(collections::BinaryHeap::with_capacity(NUM_MESSAGES + 1));
-        task::spawn(async move {
-            while let Some(transcribed_message) = rxQueue.recv().await {
-                let recent_tokens = RecentTokens::from(transcribed_message);
-                transcript.0.push(recent_tokens);
-                if transcript.0.len() > NUM_MESSAGES {
+    pub(crate) async fn monitor(
+        mut rx_queue: sync::mpsc::UnboundedReceiver<api_types::TranscribedMessage>,
+        num_messages: usize,
+    ) -> (task::JoinHandle<()>, Arc<Mutex<Self>>) {
+        let mut transcript = Arc::new(Mutex::new(Self(collections::BinaryHeap::with_capacity(
+            num_messages + 1,
+        ))));
+        let transcript_clone = transcript.clone();
+        let join_handle = task::spawn(async move {
+            while let Some(transcribed_message) = rx_queue.recv().await {
+                let mut transcript_locked = transcript_clone.lock().unwrap();
+                transcript_locked.0.push(transcribed_message);
+                if transcript_locked.0.len() > num_messages {
                     // remove the oldest message
-                    transcript.0.pop();
+                    transcript_locked.0.pop();
                 }
             }
-        })
+        });
+        return (join_handle, transcript);
     }
 
-    pub(crate) fn get_latest_tokens(&self) -> Vec<i32> {
-        // returns tokens from oldest to newest
-        let mut tokens = self
-            .0
+    pub(crate) async fn get_latest_text(&self) -> String {
+        // returns text from oldest to newest
+        self.0
             .iter()
-            .flat_map(|recent_tokens| recent_tokens.tokens.iter())
-            .copied()
-            .collect::<Vec<_>>();
-        if tokens.len() > NUM_TOKENS {
-            tokens.drain(0..(tokens.len() - NUM_TOKENS));
-        }
-        tokens
+            .map(|message| message.all_text())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    pub(crate) async fn get_latest_text_for_user(&self, user_id: api_types::UserId) -> String {
+        // returns text from oldest to newest
+        self.0
+            .iter()
+            .filter(|message| message.user_id == user_id)
+            .map(|message| message.all_text())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_transcript() {
+        const NUM_MESSAGES: usize = 3;
+        let (tx_queue, rx_queue) = sync::mpsc::unbounded_channel();
+        let (handle, activity_monitor) = super::Transcript::monitor(rx_queue, NUM_MESSAGES).await;
+        assert_eq! {
+            activity_monitor.lock().unwrap().get_latest_text().await,
+            ""
+        };
+        assert_eq! {
+            activity_monitor.lock().unwrap().get_latest_text_for_user(1).await,
+            ""
+        };
+        drop(tx_queue);
+        handle.await.unwrap();
+
+        // tx_queue
+        //     .send(api_types::TranscribedMessage {
+        //         user_id: 1,
+        //         text: "hello".to_string(),
+        //     })
+        //     .await
+        //     .unwrap();
     }
 }
