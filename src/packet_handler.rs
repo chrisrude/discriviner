@@ -7,9 +7,9 @@ use std::sync::Mutex;
 
 use tokio::task;
 
-use crate::api_types;
-use crate::types;
-use crate::voice_buffer;
+use crate::api::api_types;
+use crate::model::audio_buffer;
+use crate::model::types;
 
 pub const MAX_NUM_SPEAKING_PARTICIPANTS: usize = 10;
 

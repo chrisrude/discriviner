@@ -2,10 +2,10 @@ use crate::api::api_types;
 use crate::model::types;
 use std::collections;
 use tokio::sync;
+use tokio::task;
+use tokio::time;
 
-struct VoiceActivity {
-    map collections::HashMap<types::Ssrc, api_types::VoiceActivityData>;
-}
+struct VoiceActivity(collections::HashMap<types::UserId, (bool, time::Instant)>);
 
 /// Input:
 ///  - ssid_starts_talking event
@@ -15,25 +15,25 @@ struct VoiceActivity {
 ///    - is_anyone_talking?
 ///    - when was our most recent audio from SSID?
 impl VoiceActivity {
-    pub fn new() -> Self {
-        Self(collections::HashMap::new())
+    pub fn monitor(
+        rxQueue: sync::watch::Receiver<api_types::VoiceActivityData>,
+    ) -> task::JoinHandle<()> {
+        let voice_activity = Self(collections::HashMap::new());
+        task::spawn(async move {
+            while rxQueue.changed().await.is_ok() {
+                let activity = *rxQueue.borrow();
+                voice_activity
+                    .0
+                    .insert(activity.user_id, (activity.speaking, time::Instant::now()));
+            }
+        })
     }
 
-    pub fn on_speaking_update(&mut self, data: api_types::SpeakingUpdateData) {
-        let user_id = data.user_id;
-        let ssrc = data.ssrc;
+    pub fn is_anyone_talking(&self) -> bool {
+        self.0.iter().any(|(_, (speaking, _))| *speaking)
+    }
 
-        let entry = self.0.entry(ssrc).or_insert(api_types::VoiceActivityData {
-            user_id,
-            speaking: false,
-            ssrc,
-            start_time: None,
-            end_time: None,
-        });
-
-        entry.speaking = data.speaking;
-        if entry.start_time.is_none() {
-            entry.start_time = Some(data.timestamp);
-        }
+    pub fn last_audio_instant(&self, ssid: types::UserId) -> Option<time::Instant> {
+        self.0.get(&ssid).map(|(_, instant)| *instant)
     }
 }

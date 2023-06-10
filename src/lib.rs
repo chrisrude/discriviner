@@ -4,7 +4,7 @@ mod api {
 }
 mod model {
     pub(crate) mod audio_buffer;
-    pub(crate) mod call_attendance;
+    pub(crate) mod call_attendees;
     pub(crate) mod transcript;
     pub(crate) mod types;
     pub(crate) mod voice_activity;

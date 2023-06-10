@@ -5,8 +5,8 @@ use tokio::sync::Mutex;
 use tokio::task;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext};
 
-use crate::api_types;
-use crate::types;
+use crate::api::api_types;
+use crate::model::types;
 
 /// If an audio clip is less than this length, we'll ignore it.
 pub const MIN_AUDIO_THRESHOLD_MS: u32 = 500;
@@ -123,7 +123,9 @@ impl Whisper {
                 let last_transcription = last_transcription_copy.lock().await;
                 let lt = last_transcription.clone();
                 if let Some(last_transcription) = lt {
-                    if (unixsecs - last_transcription.timestamp) < 5 && last_transcription.user_id == user_id {
+                    if (unixsecs - last_transcription.timestamp) < 5
+                        && last_transcription.user_id == user_id
+                    {
                         last_transcription_context = Some(last_transcription);
                     }
                 }

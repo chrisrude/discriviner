@@ -1,10 +1,10 @@
-use crate::api_types;
+use crate::api::api_types;
 
 use songbird::id::{ChannelId, GuildId, UserId};
 use songbird::ConnectionInfo;
 
 pub struct Discrivener {
-    model: crate::model::Model,
+    model: crate::old_model::Model,
 }
 
 impl Discrivener {
@@ -14,7 +14,11 @@ impl Discrivener {
         dump_everything_to_a_file: Option<String>,
     ) -> Self {
         Discrivener {
-            model: crate::model::Model::load(model_path, dump_everything_to_a_file, event_callback),
+            model: crate::old_model::Model::load(
+                model_path,
+                dump_everything_to_a_file,
+                event_callback,
+            ),
         }
     }
 

@@ -8,7 +8,7 @@ use serde_with::serde_as;
 use songbird::events::context_data;
 use songbird::model::payload;
 
-use crate::api_types;
+use crate::api::api_types;
 
 pub const AUDIO_CHANNELS: usize = 2;
 

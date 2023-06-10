@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 use std::sync::Arc;
 
-use crate::api_types;
+use crate::api::api_types;
+use crate::model::types;
 use crate::packet_handler;
-use crate::types;
 use crate::whisper;
 
 /// Receives audio from Discord, and sends it to the Whisper model.

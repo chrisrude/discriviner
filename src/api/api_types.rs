@@ -42,6 +42,9 @@ pub struct TextSegment {
     /// When the audio for this segment ended.
     /// Time is relative to when the Message was received.
     pub end_offset_ms: u32,
+
+    // todo: where to put this?
+    pub(crate) tokens: Vec<i32>,
 }
 
 #[serde_as]
