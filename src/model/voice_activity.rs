@@ -1,37 +1,91 @@
 use crate::api::api_types;
+use crate::api::api_types::UserId;
+use futures::stream::futures_unordered::FuturesUnordered;
 use std::collections;
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::thread::JoinHandle;
 use tokio::sync;
 use tokio::task;
 use tokio::time;
 
-struct VoiceActivity(collections::HashMap<api_types::UserId, (bool, time::Instant)>);
+struct VoiceActivity {
+    last_time_by_user: collections::HashMap<api_types::UserId, (bool, time::Instant)>,
+    deferred_silence_callbacks: FuturesUnordered<JoinHandle<()>>,
+    rx_queue: sync::mpsc::UnboundedReceiver<api_types::VoiceActivityData>,
+    tx_queue_silent_channel: sync::mpsc::UnboundedSender<bool>,
+    tx_queue_silent_user: sync::mpsc::UnboundedSender<UserId>,
+    user_silence_timeout: std::time::Duration,
+}
 
 /// Input:
 ///  - user_id_starts_talking event
 ///  - user_id_stops_talking event
 /// Output:
-///  - answers queries about:
-///    - is_anyone_talking?
-///    - when was our most recent audio from user_id?
+///  - emits events when:
+///    - all users stop talking
+///    - anyone then starts talking
+///  - after a user has been silent for N seconds
 impl VoiceActivity {
     pub async fn monitor(
-        mut rx_queue: sync::mpsc::UnboundedReceiver<api_types::VoiceActivityData>,
-    ) -> (task::JoinHandle<()>, Arc<Mutex<VoiceActivity>>) {
-        let voice_activity = Arc::new(Mutex::new(Self(collections::HashMap::new())));
-        let voice_activity_clone = voice_activity.clone();
-        let join_handle = task::spawn(async move {
-            while let Some(activity) = rx_queue.recv().await {
-                voice_activity_clone
-                    .lock()
-                    .unwrap()
-                    .0
-                    .insert(activity.user_id, (activity.speaking, time::Instant::now()));
-            }
-        });
-        return (join_handle, voice_activity);
+        rx_queue: sync::mpsc::UnboundedReceiver<api_types::VoiceActivityData>,
+        user_silence_timeout: time::Duration,
+        tx_queue_silent_channel: sync::mpsc::UnboundedSender<bool>,
+        tx_queue_silent_user: sync::mpsc::UnboundedSender<UserId>,
+    ) -> task::JoinHandle<()> {
+        let mut voice_activity = Self {
+            last_time_by_user: collections::HashMap::new(),
+            deferred_silence_callbacks: FuturesUnordered::new(),
+            rx_queue,
+            tx_queue_silent_channel,
+            tx_queue_silent_user,
+            user_silence_timeout,
+        };
+        task::spawn(async move {
+            voice_activity.loop_forever().await;
+        })
     }
+
+    async fn loop_forever(&mut self) {
+        loop {
+            tokio::select! {
+                maybe_activity = self.rx_queue.recv() => {
+                    if maybe_activity.is_none() {
+                        // channel closed
+                        break;
+                    }
+                    let activity = maybe_activity.unwrap();
+                    let now = time::Instant::now();
+                    let silence_interval_end = now + self.user_silence_timeout;
+
+                    // store the last time we heard from this user
+                    self.last_time_by_user
+                        .insert(activity.user_id, (activity.speaking, now));
+
+                    // start a simple task that will fire a callback when
+                    // the user has been silent for N seconds.  In that callback,
+                    // we check to see if the user has been silent the whole time.
+                    // If so, we emit a "user stopped talking" event.
+                    // If the user has any voice activity since then, we just do nothing.
+                    let user_id = activity.user_id;
+                    let monitor_task = task::spawn(async move {
+                        time::sleep_until(silence_interval_end).await;
+                        return user_id;
+                    });
+                }
+            }
+        }
+        // cleanup: cancel pending silence callbacks.
+        // this might not be necessary, since the callbacks will be dropped
+        // anyway, but it's good to be explicit.
+        self.deferred_silence_callbacks.clear();
+    }
+
+    // // check to see if the user has been silent the whole time
+    // if let Some((speaking, last_time)) = self.last_time_by_user.get(&user_id) {
+    //     if !*speaking && *last_time == now {
+    //         // user has been silent the whole time
+    //         self.tx_queue_silent_user.send(user_id).unwrap();
+    //     }
+    // }
 
     pub fn is_anyone_talking(&self) -> bool {
         self.0.iter().any(|(_, (speaking, _))| *speaking)

@@ -13,17 +13,20 @@ crate-type = ["lib"]
 
 # helper for async framework
 [dependencies.async-trait]
-version = "0.1.51"
+version = "0.1.68"
+
+[dependencies.futures]
+version = "0.3.28"
 
 # ring buffer, used to store audio data
 [dependencies.ringbuf]
 version = "0.3.2"
 
 [dependencies.serde]
-version = "1.0.130"
+version = "1.0.164"
 
 [dependencies.serde_json]
-version = "1.0.66"
+version = "1.0.96"
 
 [dependencies.serde_with]
 version = "3.0.0"
@@ -66,7 +69,7 @@ version = "0.8.0"
 
 # command line argument parsing
 [dev-dependencies.clap]
-version = "4.3.0"
+version = "4.3.3"
 features = ["derive"]
 
 # just for testing

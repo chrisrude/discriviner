@@ -4,6 +4,9 @@
 // use std::sync::Mutex;
 // use tokio::sync;
 
+// todo: move to VecDeque
+// todo: move to Bytes
+
 // type AudioBuffer = ringbuf::HeapRb<types::AudioSample>;
 
 // pub(crate) struct VoiceBuffer {
