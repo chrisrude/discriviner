@@ -8,6 +8,8 @@ use whisper_rs::{FullParams, SamplingStrategy, WhisperContext};
 use crate::api::api_types;
 use crate::model::types;
 
+use super::types::DiscordAudioSample;
+
 /// If an audio clip is less than this length, we'll ignore it.
 pub const MIN_AUDIO_THRESHOLD_MS: u32 = 500;
 
@@ -91,10 +93,10 @@ impl Whisper {
     pub fn on_audio_complete(
         &self,
         user_id: api_types::UserId,
-        audio: Arc<Vec<types::AudioSample>>,
+        audio: Arc<Vec<types::DiscordAudioSample>>,
     ) {
-        let audio_duration_ms =
-            ((audio.len() / types::AUDIO_CHANNELS) / types::DISCORD_SAMPLES_PER_MILLISECOND) as u32;
+        let audio_duration_ms = ((audio.len() / types::DISCORD_AUDIO_CHANNELS)
+            / types::DISCORD_SAMPLES_PER_MILLISECOND) as u32;
         if audio_duration_ms < MIN_AUDIO_THRESHOLD_MS {
             // very short messages are usually just noise, ignore them
             return;
@@ -177,8 +179,8 @@ impl Whisper {
 }
 
 fn resample_audio_from_discord_to_whisper(
-    audio: types::AudioClip,
-) -> Vec<api_types::WhisperAudioSample> {
+    audio: Arc<Vec<DiscordAudioSample>>,
+) -> Vec<types::WhisperAudioSample> {
     // this takes advantage of the ratio between the two sample rates
     // being a whole number. If this is not the case, we'll need to
     // do some more complicated resampling.
@@ -191,12 +193,12 @@ fn resample_audio_from_discord_to_whisper(
     //
     // while converting the bitrate we'll also convert the audio
     // from stereo to mono, so we'll do everything in pairs.
-    const GROUP_SIZE: usize = BITRATE_CONVERSION_RATIO * types::AUDIO_CHANNELS;
+    const GROUP_SIZE: usize = BITRATE_CONVERSION_RATIO * types::DISCORD_AUDIO_CHANNELS;
 
     let out_len = audio.len() / GROUP_SIZE;
-    let mut audio_out = vec![0.0 as api_types::WhisperAudioSample; out_len];
+    let mut audio_out = vec![0.0 as types::WhisperAudioSample; out_len];
 
-    let mut audio_max: api_types::WhisperAudioSample = 0.0;
+    let mut audio_max: types::WhisperAudioSample = 0.0;
 
     // todo: drop audio which is very low signal?  It has had issues transcribing well.
 
@@ -225,7 +227,7 @@ fn resample_audio_from_discord_to_whisper(
 /// audio data should be is f32, 16KHz, mono
 fn audio_to_text(
     whisper_context: &Arc<WhisperContext>,
-    audio_data: Vec<api_types::WhisperAudioSample>,
+    audio_data: Vec<types::WhisperAudioSample>,
     last_transcription: Option<LastTranscriptionData>,
 ) -> Vec<api_types::TextSegment> {
     let mut state = whisper_context.create_state().unwrap();

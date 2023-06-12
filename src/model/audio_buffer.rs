@@ -1,10 +1,10 @@
 use std::collections::VecDeque;
 
 use crate::model::types;
-use bytes::Bytes;
+// use bytes::Bytes;
 use tokio::{sync, task};
 
-use super::types::DiscordVoiceData;
+// use super::types::DiscordVoiceData;
 
 struct AudioBuffer {
     buffer: VecDeque<types::WhisperAudioSample>,
@@ -14,34 +14,34 @@ struct AudioBuffer {
 }
 
 impl AudioBuffer {
-    pub fn monitor(
-        rx_queue: sync::mpsc::Receiver<types::DiscordVoiceData>,
-    ) -> task::JoinHandle<()> {
-        let mut audio_buffer = AudioBuffer {
-            buffer: VecDeque::with_capacity(types::WHISPER_AUDIO_BUFFER_SIZE),
-            last_write_timestamp: 0,
-            rx_queue,
-            write_head: 0,
-        };
-        task::spawn(async move {
-            audio_buffer.loop_forever().await;
-        })
-    }
+    // pub fn monitor(
+    //     rx_queue: sync::mpsc::Receiver<types::DiscordVoiceData>,
+    // ) -> task::JoinHandle<()> {
+    //     let mut audio_buffer = AudioBuffer {
+    //         buffer: VecDeque::with_capacity(types::WHISPER_AUDIO_BUFFER_SIZE),
+    //         last_write_timestamp: 0,
+    //         rx_queue,
+    //         write_head: 0,
+    //     };
+    //     task::spawn(async move {
+    //         audio_buffer.loop_forever().await;
+    //     })
+    // }
 
-    async fn loop_forever(&mut self) {
-        while let Some(audio_data) = self.rx_queue.recv().await {
-            let mem = Bytes::from(self.buffer);
-            self.push(&audio_data);
-        }
-    }
+    // async fn loop_forever(&mut self) {
+    //     while let Some(audio_data) = self.rx_queue.recv().await {
+    //         let mem = Bytes::from(self.buffer);
+    //         self.push(&audio_data);
+    //     }
+    // }
 
-    fn push(&mut self, audio_data: &DiscordVoiceData) {
-        // convert to whisper audio sample
-        self.buffer.push_back(types::WhisperAudioSample {
-            timestamp: audio_data.timestamp,
-            data: Bytes::copy_from_slice(&audio_data.data),
-        });
-    }
+    // fn push(&mut self, audio_data: &DiscordVoiceData) {
+    //     // convert to whisper audio sample
+    //     self.buffer.push_back(types::WhisperAudioSample {
+    //         timestamp: audio_data.timestamp,
+    //         data: Bytes::copy_from_slice(&audio_data.data),
+    //     });
+    // }
 }
 
 // type AudioBuffer = ringbuf::HeapRb<types::AudioSample>;

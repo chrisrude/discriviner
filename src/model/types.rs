@@ -1,8 +1,6 @@
 // we want to store 30 seconds of audio, 16-bit stereo PCM at 48kHz
 // divided into 20ms chunks
 
-use songbird::packet::rtp::Rtp;
-
 pub const DISCORD_AUDIO_CHANNELS: usize = 2;
 
 pub const DISCORD_SAMPLES_PER_SECOND: usize = 48000;
