@@ -45,12 +45,11 @@ impl CallAttendees {
 mod test {
     use super::*;
     use crate::api::api_types;
-    use crate::model::types;
     use tokio::sync;
 
     #[tokio::test]
     async fn test_call_attendees() {
-        let (tx, mut rx) = sync::mpsc::channel(1);
+        let (tx, rx) = sync::mpsc::channel(1);
         let (join_handle, attendees) = CallAttendees::monitor(rx).await;
         tx.send((
             1,

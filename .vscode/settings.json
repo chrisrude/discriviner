@@ -4,6 +4,7 @@
         "discrivener",
         "downsampler",
         "downsamples",
+        "guildless",
         "ringbuf",
         "ssid",
         "Ssrc"

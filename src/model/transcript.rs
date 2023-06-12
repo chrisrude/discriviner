@@ -16,7 +16,7 @@ impl Transcript {
         mut rx_queue: sync::mpsc::UnboundedReceiver<api_types::TranscribedMessage>,
         num_messages: usize,
     ) -> (task::JoinHandle<()>, Arc<Mutex<Self>>) {
-        let mut transcript = Arc::new(Mutex::new(Self(collections::BinaryHeap::with_capacity(
+        let transcript = Arc::new(Mutex::new(Self(collections::BinaryHeap::with_capacity(
             num_messages + 1,
         ))));
         let transcript_clone = transcript.clone();
