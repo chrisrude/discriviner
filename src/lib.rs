@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 pub mod api {
-    pub mod api;
+    pub mod api_methods;
     pub mod api_types;
 }
 mod model {

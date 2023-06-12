@@ -78,8 +78,8 @@ impl api_types::ConnectData {
         Self {
             channel_id: other.channel_id.map(|id| id.0),
             guild_id: other.guild_id.0,
-            session_id: other.session_id.clone().to_string(),
-            server: other.server.clone().to_string(),
+            session_id: other.session_id.to_string(),
+            server: other.server.to_string(),
             ssrc: other.ssrc,
         }
     }
@@ -127,7 +127,7 @@ impl api_types::DisconnectData {
             reason: other.reason.as_ref().map(api_types::DisconnectReason::from),
             channel_id: other.channel_id.map(|id| id.0),
             guild_id: other.guild_id.0,
-            session_id: other.session_id.clone().to_string(),
+            session_id: other.session_id.to_string(),
         }
     }
 }
