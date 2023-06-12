@@ -30,7 +30,7 @@ impl Transcript {
                 }
             }
         });
-        return (join_handle, transcript);
+        (join_handle, transcript)
     }
 
     pub(crate) async fn get_latest_text(&self) -> String {

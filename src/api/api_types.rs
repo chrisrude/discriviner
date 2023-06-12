@@ -171,7 +171,7 @@ impl TranscribedMessage {
         let mut result = String::new();
         for segment in &self.text_segments {
             result.push_str(&segment.text);
-            result.push_str(" ")
+            result.push(' ')
         }
         result
     }

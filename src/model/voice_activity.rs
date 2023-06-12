@@ -145,7 +145,7 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(rx_silent_channel.recv().await.unwrap(), false);
+        assert!(!rx_silent_channel.recv().await.unwrap());
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
         assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 
@@ -175,7 +175,7 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(rx_silent_channel.recv().await.unwrap(), true);
+        assert!(rx_silent_channel.recv().await.unwrap());
         assert_eq!(rx_silent_user.recv().await.unwrap(), 2);
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
         assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
@@ -207,7 +207,7 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(rx_silent_channel.recv().await.unwrap(), false);
+        assert!(!rx_silent_channel.recv().await.unwrap());
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
         assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 
@@ -245,7 +245,7 @@ mod tests {
         .unwrap();
 
         // we should NOT have fired a timeout for user 2 yet
-        assert_eq!(rx_silent_channel.recv().await.unwrap(), true);
+        assert!(rx_silent_channel.recv().await.unwrap());
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
         assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 
