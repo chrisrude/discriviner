@@ -486,7 +486,6 @@ dependencies = [
  "clap",
  "colored",
  "discrivener",
- "futures",
  "ringbuf",
  "serde",
  "serde_json",

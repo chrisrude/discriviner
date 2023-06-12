@@ -1,19 +1,21 @@
 use crate::api::api_types;
 use crate::api::api_types::UserId;
-use futures::stream::futures_unordered::FuturesUnordered;
 use std::collections;
-use std::thread::JoinHandle;
+use std::collections::VecDeque;
 use tokio::sync;
 use tokio::task;
 use tokio::time;
+use tokio::time::Duration;
+use tokio::time::Instant;
 
 struct VoiceActivity {
     last_time_by_user: collections::HashMap<api_types::UserId, (bool, time::Instant)>,
-    deferred_silence_callbacks: FuturesUnordered<JoinHandle<()>>,
+    silence_list: VecDeque<(Instant, UserId, Instant)>,
     rx_queue: sync::mpsc::UnboundedReceiver<api_types::VoiceActivityData>,
+    speaking_users: collections::HashSet<UserId>,
     tx_queue_silent_channel: sync::mpsc::UnboundedSender<bool>,
     tx_queue_silent_user: sync::mpsc::UnboundedSender<UserId>,
-    user_silence_timeout: std::time::Duration,
+    user_silence_timeout: Duration,
 }
 
 /// Input:
@@ -25,15 +27,18 @@ struct VoiceActivity {
 ///    - anyone then starts talking
 ///  - after a user has been silent for N seconds
 impl VoiceActivity {
+    const ONE_YEAR: Duration = Duration::from_secs(60 * 60 * 24 * 365);
+
     pub async fn monitor(
         rx_queue: sync::mpsc::UnboundedReceiver<api_types::VoiceActivityData>,
-        user_silence_timeout: time::Duration,
+        user_silence_timeout: Duration,
         tx_queue_silent_channel: sync::mpsc::UnboundedSender<bool>,
         tx_queue_silent_user: sync::mpsc::UnboundedSender<UserId>,
     ) -> task::JoinHandle<()> {
         let mut voice_activity = Self {
             last_time_by_user: collections::HashMap::new(),
-            deferred_silence_callbacks: FuturesUnordered::new(),
+            silence_list: VecDeque::new(),
+            speaking_users: collections::HashSet::new(),
             rx_queue,
             tx_queue_silent_channel,
             tx_queue_silent_user,
@@ -46,174 +51,219 @@ impl VoiceActivity {
 
     async fn loop_forever(&mut self) {
         loop {
+            let forever = time::Instant::now().checked_add(Self::ONE_YEAR).unwrap();
+            let noop_time = (forever, 0, forever);
+
+            // next future will always be at the end... only need to wait for a single one ever
             tokio::select! {
                 maybe_activity = self.rx_queue.recv() => {
                     if maybe_activity.is_none() {
-                        // channel closed
-                        break;
+                        // the sender has been dropped, so we are done
+                        return;
                     }
                     let activity = maybe_activity.unwrap();
                     let now = time::Instant::now();
-                    let silence_interval_end = now + self.user_silence_timeout;
 
-                    // store the last time we heard from this user
+                    // store the last time we heard from this user.  If the user
+                    // has not spoken again at the end of this interval, then
+                    // we will send a silent user event
                     self.last_time_by_user
                         .insert(activity.user_id, (activity.speaking, now));
 
-                    // start a simple task that will fire a callback when
-                    // the user has been silent for N seconds.  In that callback,
-                    // we check to see if the user has been silent the whole time.
-                    // If so, we emit a "user stopped talking" event.
-                    // If the user has any voice activity since then, we just do nothing.
-                    let user_id = activity.user_id;
-                    let monitor_task = task::spawn(async move {
-                        time::sleep_until(silence_interval_end).await;
-                        return user_id;
-                    });
+                    self.silence_list.push_back((now + self.user_silence_timeout, activity.user_id, now));
+
+                    // track the list of users speaking in the channel, and
+                    // send an event when the list goes from empty to non-empty
+                    // or from non-empty to empty
+                    if activity.speaking {
+                        let was_empty = self.speaking_users.is_empty();
+                        self.speaking_users.insert(activity.user_id);
+                        if was_empty {
+                            self.tx_queue_silent_channel.send(false).unwrap();
+                        }
+                    } else {
+                        let was_someone_speaking = !self.speaking_users.is_empty();
+                        self.speaking_users.remove(&activity.user_id);
+                        if was_someone_speaking && self.speaking_users.is_empty() {
+                            self.tx_queue_silent_channel.send(true).unwrap();
+                        }
+                    }
                 }
+                () = time::sleep_until(
+                    self.silence_list.get(0).unwrap_or(&noop_time).0
+                ) => {
+                    let now = time::Instant::now();
+                    let mut silence_list = std::mem::take(&mut self.silence_list);
+                    while let Some((silence_timeout, user_id, last_time)) = silence_list.pop_front() {
+                        if silence_timeout > now {
+                            silence_list.push_front((silence_timeout, user_id, last_time));
+                            break;
+                        }
+                        // is the current most recent speaking time the same as last_time?
+                        // if so, then the user has been silent the whole time
+                        if let Some((speaking, last_time_actual)) = self.last_time_by_user.get(&user_id) {
+                            if !*speaking && last_time == *last_time_actual {
+                                // user has been silent the whole time
+                                self.tx_queue_silent_user.send(user_id).unwrap();
+                            }
+                        }
+                    }
+                    self.silence_list = silence_list;
+                }
+
             }
         }
-        // cleanup: cancel pending silence callbacks.
-        // this might not be necessary, since the callbacks will be dropped
-        // anyway, but it's good to be explicit.
-        self.deferred_silence_callbacks.clear();
-    }
-
-    // // check to see if the user has been silent the whole time
-    // if let Some((speaking, last_time)) = self.last_time_by_user.get(&user_id) {
-    //     if !*speaking && *last_time == now {
-    //         // user has been silent the whole time
-    //         self.tx_queue_silent_user.send(user_id).unwrap();
-    //     }
-    // }
-
-    pub fn is_anyone_talking(&self) -> bool {
-        self.0.iter().any(|(_, (speaking, _))| *speaking)
-    }
-
-    pub fn latest_audio_instant(&self, user_id: api_types::UserId) -> Option<time::Instant> {
-        self.0.get(&user_id).map(|(_, instant)| *instant)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use tokio::sync::mpsc::error::TryRecvError;
+
     use super::*;
 
     #[tokio::test]
     async fn test_voice_activity() {
-        let (tx_queue, rx_queue) = sync::mpsc::unbounded_channel();
-        let (handle, activity_monitor) = super::VoiceActivity::monitor(rx_queue).await;
-        assert! {
-            !activity_monitor.lock().unwrap().is_anyone_talking()
-        };
-        assert! {
-            activity_monitor.lock().unwrap().latest_audio_instant(1).is_none()
-        };
-        assert! {
-            activity_monitor.lock().unwrap().latest_audio_instant(2).is_none()
-        };
+        let (tx, rx) = sync::mpsc::unbounded_channel();
+        let (tx_silent_channel, mut rx_silent_channel) = sync::mpsc::unbounded_channel();
+        let (tx_silent_user, mut rx_silent_user) = sync::mpsc::unbounded_channel();
+        let voice_activity = VoiceActivity::monitor(
+            rx,
+            Duration::from_millis(1),
+            tx_silent_channel,
+            tx_silent_user,
+        )
+        .await;
 
-        tx_queue
-            .send(api_types::VoiceActivityData {
-                user_id: 1,
-                speaking: true,
-            })
-            .unwrap();
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 
-        // sleep slightly to allow the monitor to process the event
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        assert! {
-            activity_monitor.lock().unwrap().is_anyone_talking()
-        };
-        assert! {
-            activity_monitor.lock().unwrap().latest_audio_instant(1).is_some()
-        };
-        assert! {
-            activity_monitor.lock().unwrap().latest_audio_instant(2).is_none()
-        };
+        // user 1 starts talking
+        tx.send(api_types::VoiceActivityData {
+            user_id: 1,
+            speaking: true,
+        })
+        .unwrap();
 
-        tx_queue
-            .send(api_types::VoiceActivityData {
-                user_id: 2,
-                speaking: true,
-            })
-            .unwrap();
+        assert_eq!(rx_silent_channel.recv().await.unwrap(), false);
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 
-        tx_queue
-            .send(super::api_types::VoiceActivityData {
-                user_id: 1,
-                speaking: false,
-            })
-            .unwrap();
+        // user 2 starts talking
+        tx.send(api_types::VoiceActivityData {
+            user_id: 2,
+            speaking: true,
+        })
+        .unwrap();
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 
-        // sleep slightly to allow the monitor to process the event
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        assert! {
-            activity_monitor.lock().unwrap().is_anyone_talking()
-        };
-        assert! {
-            activity_monitor.lock().unwrap().latest_audio_instant(1).is_some()
-        };
-        assert! {
-            activity_monitor.lock().unwrap().latest_audio_instant(2).is_some()
-        };
+        // user 1 stops talking
+        tx.send(api_types::VoiceActivityData {
+            user_id: 1,
+            speaking: false,
+        })
+        .unwrap();
+        assert_eq!(rx_silent_user.recv().await.unwrap(), 1);
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 
-        tx_queue
-            .send(super::api_types::VoiceActivityData {
-                user_id: 2,
-                speaking: false,
-            })
-            .unwrap();
-        tx_queue
-            .send(super::api_types::VoiceActivityData {
-                user_id: 1,
-                speaking: true,
-            })
-            .unwrap();
-        tx_queue
-            .send(super::api_types::VoiceActivityData {
-                user_id: 2,
-                speaking: true,
-            })
-            .unwrap();
+        // user 2 stops talking
+        tx.send(api_types::VoiceActivityData {
+            user_id: 2,
+            speaking: false,
+        })
+        .unwrap();
 
-        // sleep slightly to allow the monitor to process the event
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        assert! {
-            activity_monitor.lock().unwrap().is_anyone_talking()
-        };
-        assert! {
-            activity_monitor.lock().unwrap().latest_audio_instant(1).is_some()
-        };
-        assert! {
-            activity_monitor.lock().unwrap().latest_audio_instant(2).is_some()
-        };
+        assert_eq!(rx_silent_channel.recv().await.unwrap(), true);
+        assert_eq!(rx_silent_user.recv().await.unwrap(), 2);
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 
-        tx_queue
-            .send(super::api_types::VoiceActivityData {
-                user_id: 1,
-                speaking: false,
-            })
-            .unwrap();
-        tx_queue
-            .send(super::api_types::VoiceActivityData {
-                user_id: 2,
-                speaking: false,
-            })
-            .unwrap();
+        // close the sender, which will cause the loop to exit
+        drop(tx);
+        voice_activity.await.unwrap();
+    }
 
-        drop(tx_queue);
-        handle.await.unwrap();
+    async fn test_voice_activity_with_interruption() {
+        let (tx, rx) = sync::mpsc::unbounded_channel();
+        let (tx_silent_channel, mut rx_silent_channel) = sync::mpsc::unbounded_channel();
+        let (tx_silent_user, mut rx_silent_user) = sync::mpsc::unbounded_channel();
+        let voice_activity = VoiceActivity::monitor(
+            rx,
+            Duration::from_millis(10),
+            tx_silent_channel,
+            tx_silent_user,
+        )
+        .await;
 
-        assert! {
-            !activity_monitor.lock().unwrap().is_anyone_talking()
-        };
-        assert! {
-            activity_monitor.lock().unwrap().latest_audio_instant(1).is_some()
-        };
-        assert! {
-            activity_monitor.lock().unwrap().latest_audio_instant(2).is_some()
-        };
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
+
+        // user 1 starts talking
+        tx.send(api_types::VoiceActivityData {
+            user_id: 1,
+            speaking: true,
+        })
+        .unwrap();
+
+        assert_eq!(rx_silent_channel.recv().await.unwrap(), false);
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
+
+        // user 2 starts talking
+        tx.send(api_types::VoiceActivityData {
+            user_id: 2,
+            speaking: true,
+        })
+        .unwrap();
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
+
+        // user 1 stops talking
+        tx.send(api_types::VoiceActivityData {
+            user_id: 1,
+            speaking: false,
+        })
+        .unwrap();
+        // we should NOT have sent a silent user timeout
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
+
+        // now wait a while, and expect a timeout
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        assert_eq!(rx_silent_user.recv().await.unwrap(), 1);
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
+
+        // user 2 stops talking
+        tx.send(api_types::VoiceActivityData {
+            user_id: 2,
+            speaking: false,
+        })
+        .unwrap();
+
+        // we should NOT have fired a timeout for user 2 yet
+        assert_eq!(rx_silent_channel.recv().await.unwrap(), true);
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
+
+        // before the timeout, user 2 starts talking again
+        tx.send(api_types::VoiceActivityData {
+            user_id: 2,
+            speaking: true,
+        })
+        .unwrap();
+
+        // we should still not fire a timeout for user 2, even
+        // after some delay
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
+
+        // close the sender, which will cause the loop to exit
+        drop(tx);
+        voice_activity.await.unwrap();
     }
 }
