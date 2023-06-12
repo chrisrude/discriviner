@@ -7,9 +7,12 @@
         "guildless",
         "ringbuf",
         "ssid",
-        "Ssrc"
+        "Ssrc",
+        "unixsecs",
+        "unixtime"
     ],
     "rust-analyzer.linkedProjects": [
+        "./Cargo.toml",
         "./Cargo.toml",
         "./Cargo.toml",
         "./Cargo.toml"
