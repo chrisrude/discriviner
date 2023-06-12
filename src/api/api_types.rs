@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
-pub type WhisperAudioSample = f32;
 pub type UserId = u64;
 
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, Serialize, Deserialize)]

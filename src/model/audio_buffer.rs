@@ -1,11 +1,48 @@
-// use crate::model::types;
-// use ringbuf::{Consumer, Producer};
-// use std::sync::Arc;
-// use std::sync::Mutex;
-// use tokio::sync;
+use std::collections::VecDeque;
 
-// todo: move to VecDeque
-// todo: move to Bytes
+use crate::model::types;
+use bytes::Bytes;
+use tokio::{sync, task};
+
+use super::types::DiscordVoiceData;
+
+struct AudioBuffer {
+    buffer: VecDeque<types::WhisperAudioSample>,
+    write_head: usize,
+    last_write_timestamp: u32,
+    rx_queue: sync::mpsc::Receiver<types::DiscordVoiceData>,
+}
+
+impl AudioBuffer {
+    pub fn monitor(
+        rx_queue: sync::mpsc::Receiver<types::DiscordVoiceData>,
+    ) -> task::JoinHandle<()> {
+        let mut audio_buffer = AudioBuffer {
+            buffer: VecDeque::with_capacity(types::WHISPER_AUDIO_BUFFER_SIZE),
+            last_write_timestamp: 0,
+            rx_queue,
+            write_head: 0,
+        };
+        task::spawn(async move {
+            audio_buffer.loop_forever().await;
+        })
+    }
+
+    async fn loop_forever(&mut self) {
+        while let Some(audio_data) = self.rx_queue.recv().await {
+            let mem = Bytes::from(self.buffer);
+            self.push(&audio_data);
+        }
+    }
+
+    fn push(&mut self, audio_data: &DiscordVoiceData) {
+        // convert to whisper audio sample
+        self.buffer.push_back(types::WhisperAudioSample {
+            timestamp: audio_data.timestamp,
+            data: Bytes::copy_from_slice(&audio_data.data),
+        });
+    }
+}
 
 // type AudioBuffer = ringbuf::HeapRb<types::AudioSample>;
 
@@ -21,7 +58,7 @@
 //     receiver: sync::mpsc::Receiver<Vec<types::MyVoiceData>>,
 // }
 
-// impl<'a> VoiceBuffer {
+// impl VoiceBuffer {
 //     pub(crate) fn new(callback: types::AudioCallback) -> Self {
 //         let buffer = AudioBuffer::new(types::AUDIO_BUFFER_SIZE);
 
