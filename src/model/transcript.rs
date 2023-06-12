@@ -33,7 +33,7 @@ impl Transcript {
         (join_handle, transcript)
     }
 
-    pub(crate) async fn get_latest_text(&self) -> String {
+    pub(crate) fn get_latest_text(&self) -> String {
         // returns text from oldest to newest
         self.0
             .iter()
@@ -42,7 +42,7 @@ impl Transcript {
             .join(" ")
     }
 
-    pub(crate) async fn get_latest_text_for_user(&self, user_id: api_types::UserId) -> String {
+    pub(crate) fn get_latest_text_for_user(&self, user_id: api_types::UserId) -> String {
         // returns text from oldest to newest
         self.0
             .iter()
@@ -63,11 +63,11 @@ mod test {
         let (tx_queue, rx_queue) = sync::mpsc::unbounded_channel();
         let (handle, activity_monitor) = super::Transcript::monitor(rx_queue, NUM_MESSAGES).await;
         assert_eq! {
-            activity_monitor.lock().unwrap().get_latest_text().await,
+            activity_monitor.lock().unwrap().get_latest_text(),
             ""
         };
         assert_eq! {
-            activity_monitor.lock().unwrap().get_latest_text_for_user(1).await,
+            activity_monitor.lock().unwrap().get_latest_text_for_user(1),
             ""
         };
         drop(tx_queue);

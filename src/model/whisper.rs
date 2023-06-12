@@ -182,7 +182,6 @@ fn resample_audio_from_discord_to_whisper(
     // this takes advantage of the ratio between the two sample rates
     // being a whole number. If this is not the case, we'll need to
     // do some more complicated resampling.
-    assert!(types::DISCORD_SAMPLES_PER_SECOND % types::WHISPER_SAMPLES_PER_SECOND == 0);
     const BITRATE_CONVERSION_RATIO: usize =
         types::DISCORD_SAMPLES_PER_SECOND / types::WHISPER_SAMPLES_PER_SECOND;
 
@@ -206,10 +205,7 @@ fn resample_audio_from_discord_to_whisper(
     for (i, samples) in audio.chunks_exact(GROUP_SIZE).enumerate() {
         // take the first two values of samples, and add them into audio_out .
         // also, find the largest absolute value, and store it in audio_max
-        let mut val = 0.0;
-        for j in 0..types::AUDIO_CHANNELS {
-            val += samples[j] as api_types::WhisperAudioSample;
-        }
+        let val: f32 = samples.iter().map(|x| *x as f32).sum();
         let abs = val.abs();
         if abs > audio_max {
             audio_max = abs;
@@ -237,10 +233,11 @@ fn audio_to_text(
     let mut params = make_params();
 
     // if we have a last_transcription, add it to the state
-    let last_tokens;
-    if last_transcription.is_some() {
-        last_tokens = last_transcription.unwrap().tokens;
-        params.set_tokens(&last_tokens[..]);
+    let last_tokens: LastTranscriptionData;
+    if let Some(last_tokens_tmp) = last_transcription {
+        // assign to a variable to ensure lifetime is long enough
+        last_tokens = last_tokens_tmp;
+        params.set_tokens(&last_tokens.tokens[..]);
     }
 
     // actually convert audio to text.  Takes a while.
