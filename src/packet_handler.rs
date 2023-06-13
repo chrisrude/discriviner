@@ -76,7 +76,7 @@ impl PacketHandler {
 
     fn on_audio(
         &self,
-        audio: &Vec<DiscordAudioSample>,
+        audio: &[DiscordAudioSample],
         timestamp: DiscordRtcTimestamp,
         ssrc: types::Ssrc,
     ) {
@@ -84,7 +84,7 @@ impl PacketHandler {
             self.audio_events_sender
                 .send(DiscordVoiceData {
                     user_id,
-                    audio: audio.clone(),
+                    audio: audio.to_vec(),
                     timestamp,
                 })
                 .unwrap();
@@ -230,12 +230,15 @@ pub(crate) async fn register_events(handler: &Arc<PacketHandler>, driver: &mut s
         MyEventHandler {
             packet_handler: handler.clone(),
             handler: |ctx, my_handler| {
-                if let EventContext::VoicePacket(VoiceData { audio, packet, .. }) = ctx {
+                if let EventContext::VoicePacket(VoiceData {
+                    audio: Some(audio),
+                    packet,
+                    ..
+                }) = ctx
+                {
                     // An event which fires for every received audio packet,
                     // containing the decoded data.
-                    if let Some(audio) = audio {
-                        my_handler.on_audio(audio, packet.timestamp.0, packet.ssrc);
-                    }
+                    my_handler.on_audio(audio, packet.timestamp.0, packet.ssrc);
                 }
             },
         },
