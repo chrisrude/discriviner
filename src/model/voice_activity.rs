@@ -116,154 +116,154 @@ impl VoiceActivity {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use tokio::sync::mpsc::error::TryRecvError;
+#[cfg(test)]
+mod tests {
+    use tokio::sync::mpsc::error::TryRecvError;
 
-//     use super::*;
+    use super::*;
 
-//     #[tokio::test]
-//     async fn test_voice_activity() {
-//         let (tx, rx) = sync::mpsc::unbounded_channel();
-//         let (tx_silent_channel, mut rx_silent_channel) = sync::mpsc::unbounded_channel();
-//         let (tx_silent_user, mut rx_silent_user) = sync::mpsc::unbounded_channel();
-//         let voice_activity = VoiceActivity::monitor(
-//             rx,
-//             Duration::from_millis(1),
-//             tx_silent_channel,
-//             tx_silent_user,
-//         )
-//         .await;
+    #[tokio::test]
+    async fn test_voice_activity() {
+        let (tx, rx) = sync::mpsc::unbounded_channel();
+        let (tx_silent_channel, mut rx_silent_channel) = sync::mpsc::unbounded_channel();
+        let (tx_silent_user, mut rx_silent_user) = sync::mpsc::unbounded_channel();
+        let voice_activity = VoiceActivity::monitor(
+            rx,
+            Duration::from_millis(1),
+            tx_silent_channel,
+            tx_silent_user,
+        )
+        .await;
 
-//         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
-//         assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 
-//         // user 1 starts talking
-//         tx.send(api_types::VoiceActivityData {
-//             user_id: 1,
-//             speaking: true,
-//         })
-//         .unwrap();
+        // user 1 starts talking
+        tx.send(VoiceActivityData {
+            user_id: 1,
+            speaking: true,
+        })
+        .unwrap();
 
-//         assert!(!rx_silent_channel.recv().await.unwrap());
-//         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
-//         assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
+        assert!(!rx_silent_channel.recv().await.unwrap());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 
-//         // user 2 starts talking
-//         tx.send(api_types::VoiceActivityData {
-//             user_id: 2,
-//             speaking: true,
-//         })
-//         .unwrap();
-//         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
-//         assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
+        // user 2 starts talking
+        tx.send(VoiceActivityData {
+            user_id: 2,
+            speaking: true,
+        })
+        .unwrap();
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 
-//         // user 1 stops talking
-//         tx.send(api_types::VoiceActivityData {
-//             user_id: 1,
-//             speaking: false,
-//         })
-//         .unwrap();
-//         assert_eq!(rx_silent_user.recv().await.unwrap(), 1);
-//         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
-//         assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
+        // user 1 stops talking
+        tx.send(VoiceActivityData {
+            user_id: 1,
+            speaking: false,
+        })
+        .unwrap();
+        assert_eq!(rx_silent_user.recv().await.unwrap(), 1);
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 
-//         // user 2 stops talking
-//         tx.send(api_types::VoiceActivityData {
-//             user_id: 2,
-//             speaking: false,
-//         })
-//         .unwrap();
+        // user 2 stops talking
+        tx.send(VoiceActivityData {
+            user_id: 2,
+            speaking: false,
+        })
+        .unwrap();
 
-//         assert!(rx_silent_channel.recv().await.unwrap());
-//         assert_eq!(rx_silent_user.recv().await.unwrap(), 2);
-//         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
-//         assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
+        assert!(rx_silent_channel.recv().await.unwrap());
+        assert_eq!(rx_silent_user.recv().await.unwrap(), 2);
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 
-//         // close the sender, which will cause the loop to exit
-//         drop(tx);
-//         voice_activity.await.unwrap();
-//     }
+        // close the sender, which will cause the loop to exit
+        drop(tx);
+        voice_activity.await.unwrap();
+    }
 
-//     async fn test_voice_activity_with_interruption() {
-//         let (tx, rx) = sync::mpsc::unbounded_channel();
-//         let (tx_silent_channel, mut rx_silent_channel) = sync::mpsc::unbounded_channel();
-//         let (tx_silent_user, mut rx_silent_user) = sync::mpsc::unbounded_channel();
-//         let voice_activity = VoiceActivity::monitor(
-//             rx,
-//             Duration::from_millis(10),
-//             tx_silent_channel,
-//             tx_silent_user,
-//         )
-//         .await;
+    async fn test_voice_activity_with_interruption() {
+        let (tx, rx) = sync::mpsc::unbounded_channel();
+        let (tx_silent_channel, mut rx_silent_channel) = sync::mpsc::unbounded_channel();
+        let (tx_silent_user, mut rx_silent_user) = sync::mpsc::unbounded_channel();
+        let voice_activity = VoiceActivity::monitor(
+            rx,
+            Duration::from_millis(10),
+            tx_silent_channel,
+            tx_silent_user,
+        )
+        .await;
 
-//         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
-//         assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 
-//         // user 1 starts talking
-//         tx.send(api_types::VoiceActivityData {
-//             user_id: 1,
-//             speaking: true,
-//         })
-//         .unwrap();
+        // user 1 starts talking
+        tx.send(VoiceActivityData {
+            user_id: 1,
+            speaking: true,
+        })
+        .unwrap();
 
-//         assert!(!rx_silent_channel.recv().await.unwrap());
-//         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
-//         assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
+        assert!(!rx_silent_channel.recv().await.unwrap());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 
-//         // user 2 starts talking
-//         tx.send(api_types::VoiceActivityData {
-//             user_id: 2,
-//             speaking: true,
-//         })
-//         .unwrap();
-//         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
-//         assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
+        // user 2 starts talking
+        tx.send(VoiceActivityData {
+            user_id: 2,
+            speaking: true,
+        })
+        .unwrap();
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 
-//         // user 1 stops talking
-//         tx.send(api_types::VoiceActivityData {
-//             user_id: 1,
-//             speaking: false,
-//         })
-//         .unwrap();
-//         // we should NOT have sent a silent user timeout
-//         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
-//         assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
+        // user 1 stops talking
+        tx.send(VoiceActivityData {
+            user_id: 1,
+            speaking: false,
+        })
+        .unwrap();
+        // we should NOT have sent a silent user timeout
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 
-//         // now wait a while, and expect a timeout
-//         tokio::time::sleep(Duration::from_millis(20)).await;
+        // now wait a while, and expect a timeout
+        tokio::time::sleep(Duration::from_millis(20)).await;
 
-//         assert_eq!(rx_silent_user.recv().await.unwrap(), 1);
-//         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
-//         assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
+        assert_eq!(rx_silent_user.recv().await.unwrap(), 1);
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 
-//         // user 2 stops talking
-//         tx.send(api_types::VoiceActivityData {
-//             user_id: 2,
-//             speaking: false,
-//         })
-//         .unwrap();
+        // user 2 stops talking
+        tx.send(VoiceActivityData {
+            user_id: 2,
+            speaking: false,
+        })
+        .unwrap();
 
-//         // we should NOT have fired a timeout for user 2 yet
-//         assert!(rx_silent_channel.recv().await.unwrap());
-//         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
-//         assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
+        // we should NOT have fired a timeout for user 2 yet
+        assert!(rx_silent_channel.recv().await.unwrap());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 
-//         // before the timeout, user 2 starts talking again
-//         tx.send(api_types::VoiceActivityData {
-//             user_id: 2,
-//             speaking: true,
-//         })
-//         .unwrap();
+        // before the timeout, user 2 starts talking again
+        tx.send(VoiceActivityData {
+            user_id: 2,
+            speaking: true,
+        })
+        .unwrap();
 
-//         // we should still not fire a timeout for user 2, even
-//         // after some delay
-//         tokio::time::sleep(Duration::from_millis(20)).await;
-//         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
-//         assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
+        // we should still not fire a timeout for user 2, even
+        // after some delay
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 
-//         // close the sender, which will cause the loop to exit
-//         drop(tx);
-//         voice_activity.await.unwrap();
-//     }
-// }
+        // close the sender, which will cause the loop to exit
+        drop(tx);
+        voice_activity.await.unwrap();
+    }
+}

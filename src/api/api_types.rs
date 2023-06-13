@@ -52,7 +52,7 @@ pub struct ConnectData {
     /// ID of the voice channel being joined, if it is known.
     ///
     /// If this is available, then this can be used to reconnect/renew
-    /// a voice session via thew gateway.
+    /// a voice session via the gateway.
     pub channel_id: Option<u64>,
     /// ID of the target voice channel's parent guild.
     pub guild_id: u64,
@@ -65,15 +65,6 @@ pub struct ConnectData {
     /// may be useful if you need/wish to move your voice connection to a node/shard
     /// closer to Discord.
     pub server: String,
-    /// The [RTP SSRC] *("Synchronisation source")* assigned by the voice server
-    /// for the duration of this call.
-    ///
-    /// All packets sent will use this SSRC, which is not related to the sender's User
-    /// ID. These are usually allocated sequentially by Discord, following on from
-    /// a random starting SSRC.
-    ///
-    /// [RTP SSRC]: https://tools.ietf.org/html/rfc3550#section-3
-    pub ssrc: u32,
 }
 
 #[serde_as]
@@ -97,6 +88,8 @@ pub enum DisconnectKind {
     /// Otherwise, this is likely a session expiry (requiring user
     /// handling to fully disconnect/reconnect).
     Runtime,
+    /// Some value we didn't expect.
+    Unknown,
 }
 
 /// The reason that a voice connection failed.
@@ -124,6 +117,8 @@ pub enum DisconnectReason {
     /// This typically indicates that the voice session has expired,
     /// and a new one needs to be requested via the gateway.
     WsClosed(Option<u32>),
+    // Unexpected value
+    Unknown,
 }
 
 #[serde_as]

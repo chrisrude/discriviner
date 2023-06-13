@@ -1,6 +1,8 @@
 // we want to store 30 seconds of audio, 16-bit stereo PCM at 48kHz
 // divided into 20ms chunks
 
+use std::num::Wrapping;
+
 pub const DISCORD_AUDIO_CHANNELS: usize = 2;
 
 pub const DISCORD_SAMPLES_PER_SECOND: usize = 48000;
@@ -19,6 +21,13 @@ pub const AUDIO_TO_RECORD_MILLISECONDS: usize = AUDIO_TO_RECORD_SECONDS * 1000;
 pub const WHISPER_SAMPLES_PER_SECOND: usize = 16000;
 pub const WHISPER_SAMPLES_PER_MILLISECOND: usize = WHISPER_SAMPLES_PER_SECOND / 1000;
 
+// being a whole number. If this is not the case, we'll need to
+// do some more complicated resampling.
+pub const BITRATE_CONVERSION_RATIO: usize = DISCORD_SAMPLES_PER_SECOND / WHISPER_SAMPLES_PER_SECOND;
+
+pub const WHISPER_PACKET_GROUP_SIZE: usize =
+    DISCORD_PACKET_GROUP_SIZE / (BITRATE_CONVERSION_RATIO / DISCORD_AUDIO_CHANNELS);
+
 // the total size of the buffer we'll use to store audio, in samples
 pub const WHISPER_AUDIO_BUFFER_SIZE: usize = WHISPER_SAMPLES_PER_SECOND * AUDIO_TO_RECORD_SECONDS;
 
@@ -29,9 +38,14 @@ pub const MIN_AUDIO_THRESHOLD_MS: u32 = 500;
 /// use them to seed the next transcription.  This is per-user.
 pub const TOKENS_TO_KEEP: usize = 1024;
 
+// this takes advantage of the ratio between the two sample rates
+
 pub type DiscordAudioSample = i16;
-pub type DiscordRtcTimestamp = u32; // todo: this is a wraparound type, use that instead?
+pub type DiscordRtcTimestamp = Wrapping<u32>;
 pub type Ssrc = u32;
 pub type UserId = u64;
 pub type WhisperAudioSample = f32;
 pub type WhisperToken = i32;
+
+pub const DISCORD_AUDIO_MAX_VALUE: WhisperAudioSample =
+    DiscordAudioSample::MAX as WhisperAudioSample;

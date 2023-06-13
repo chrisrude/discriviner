@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{path::Path, sync::Arc};
 
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext};
 
@@ -17,32 +17,23 @@ fn make_params() -> FullParams<'static, 'static> {
     params
 }
 
-// impl Whisper {
-//     /// Load a model from the given path
-//     pub fn load(
-//         model_path: String,
-//         event_callback: Arc<dyn Fn(api_types::VoiceChannelEvent) + Send + Sync>,
-//     ) -> Self {
-//         let path = Path::new(model_path.as_str());
-//         if !path.exists() {
-//             panic!("Model file does not exist: {}", path.to_str().unwrap());
-//         }
-//         if !path.is_file() {
-//             panic!("Model is not a file: {}", path.to_str().unwrap());
-//         }
+impl Whisper {
+    /// Load a model from the given path
+    pub fn load(model_path: String) -> Self {
+        let path = Path::new(model_path.as_str());
+        if !path.exists() {
+            panic!("Model file does not exist: {}", path.to_str().unwrap());
+        }
+        if !path.is_file() {
+            panic!("Model is not a file: {}", path.to_str().unwrap());
+        }
 
-//         let whisper_context =
-//             Arc::new(WhisperContext::new(model_path.as_str()).expect("failed to load model"));
+        let whisper_context =
+            Arc::new(WhisperContext::new(model_path.as_str()).expect("failed to load model"));
 
-//         let last_transcription = Arc::new(Mutex::new(None));
-
-//         Self {
-//             event_callback,
-//             last_transcription,
-//             whisper_context,
-//         }
-//     }
-// }
+        Self { whisper_context }
+    }
+}
 
 // /// ctx came from load_model
 // /// audio data should be is f32, 16KHz, mono

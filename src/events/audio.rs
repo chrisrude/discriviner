@@ -13,15 +13,16 @@ use crate::{
     },
 };
 
+#[derive(Debug)]
 pub(crate) struct DiscordVoiceData {
     pub audio: Vec<DiscordAudioSample>,
-    pub timestamp: u32,
-    pub ssrc: u32,
+    pub timestamp: DiscordRtcTimestamp,
+    pub user_id: UserId,
 }
 
 pub(crate) struct AudioBufferForUser {
     /// User ID of the user that this buffer is for.
-    pub user_id: u64,
+    pub user_id: UserId,
 
     /// The buffers themselves.  We use two buffers so that
     /// we can write without blocking the transcription worker.
@@ -65,6 +66,7 @@ pub struct AudioBuffer {
     pub last_transcription_timestamp: DiscordRtcTimestamp,
 }
 
+#[derive(Debug)]
 pub struct VoiceActivityData {
     /// Sent when a user begins speaking or stops speaking.
     pub user_id: u64,

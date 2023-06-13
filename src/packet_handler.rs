@@ -1,288 +1,356 @@
-// /// Manages multiple buffers for each user who is speaking.
-// /// Tracks when users have stopped speaking, and fires a callback.
-// use std::collections::HashMap;
-// use std::io::Write;
-// use std::sync::Arc;
-// use std::sync::Mutex;
+use std::sync::Arc;
 
-// use tokio::task;
+/// Manages multiple buffers for each user who is speaking.
+/// Tracks when users have stopped speaking, and fires a callback.
+use async_trait::async_trait;
 
-// use crate::api::api_types;
-// use crate::model::audio_buffer;
-// use crate::model::types;
+use songbird::events::context_data::ConnectData;
+use songbird::events::context_data::DisconnectData;
+use songbird::events::context_data::DisconnectKind;
+use songbird::events::context_data::DisconnectReason;
+use songbird::events::context_data::SpeakingUpdateData;
+use songbird::events::context_data::VoiceData;
+use songbird::model::payload::Speaking;
+use songbird::EventContext;
 
-// pub const MAX_NUM_SPEAKING_PARTICIPANTS: usize = 10;
+use std::sync::RwLock;
+use tokio::sync::mpsc::UnboundedSender;
 
-// pub struct PacketHandler {
-//     // we want to store a VoiceBuffer for each participant who is
-//     // talking simultaneously. We can use the SSRC to identify each
-//     // participant.
-//     //
-//     // We can do things like eagerly allocate a number of buffers,
-//     // so that we don't have to run an allocation from the packet
-//     // handler thread.
-//     ssrc_to_user_voice_data: Arc<Mutex<HashMap<types::Ssrc, voice_buffer::VoiceBufferForUser>>>,
+use crate::api::api_types;
+use crate::events::audio::DiscordVoiceData;
+use crate::events::audio::VoiceActivityData;
+use crate::model::types;
+use crate::model::types::DiscordAudioSample;
+use crate::model::types::DiscordRtcTimestamp;
 
-//     audio_complete_callback: types::AudioCallback,
+pub(crate) struct PacketHandler {
+    ssrc_to_user_id: RwLock<std::collections::HashMap<types::Ssrc, types::UserId>>,
+    audio_events_sender: UnboundedSender<DiscordVoiceData>,
+    user_api_events_sender: UnboundedSender<api_types::VoiceChannelEvent>,
+    voice_activity_events_sender: UnboundedSender<VoiceActivityData>,
+}
 
-//     maybe_log_file_mutex: Option<Arc<Mutex<std::fs::File>>>,
+impl PacketHandler {
+    pub(crate) async fn new(
+        driver: &mut songbird::Driver,
+        audio_events_sender: UnboundedSender<DiscordVoiceData>,
+        user_api_events_sender: UnboundedSender<api_types::VoiceChannelEvent>,
+        voice_activity_events_sender: UnboundedSender<VoiceActivityData>,
+    ) -> Arc<Self> {
+        let handler = Arc::new(Self {
+            ssrc_to_user_id: RwLock::new(std::collections::HashMap::new()),
+            audio_events_sender,
+            user_api_events_sender,
+            voice_activity_events_sender,
+        });
+        register_events(&handler, driver).await;
+        handler
+    }
 
-//     event_callback: Arc<dyn Fn(api_types::VoiceChannelEvent) + Send + Sync>,
-// }
+    fn on_user_join(&self, ssrc: types::Ssrc, user_id: types::UserId) {
+        {
+            // map the SSRC to the user ID
+            self.ssrc_to_user_id.write().unwrap().insert(ssrc, user_id);
+        }
+        self.user_api_events_sender
+            .send(api_types::VoiceChannelEvent::UserJoin(
+                api_types::UserJoinData {
+                    user_id,
+                    joined: true,
+                },
+            ))
+            .unwrap();
+    }
 
-// impl PacketHandler {
-//     pub fn new(
-//         audio_complete_callback: types::AudioCallback,
-//         dump_everything_to_a_file: Option<String>,
-//         event_callback: Arc<dyn Fn(api_types::VoiceChannelEvent) + Send + Sync>,
-//     ) -> Self {
-//         let mut maybe_log_file_mutex = None;
-//         if let Some(everything_file) = dump_everything_to_a_file {
-//             let log_file = std::fs::File::create(everything_file).unwrap();
-//             maybe_log_file_mutex = Some(Arc::new(Mutex::new(log_file)));
-//         }
-//         Self {
-//             ssrc_to_user_voice_data: Arc::new(Mutex::new(HashMap::with_capacity(
-//                 MAX_NUM_SPEAKING_PARTICIPANTS,
-//             ))),
-//             audio_complete_callback,
-//             maybe_log_file_mutex,
-//             event_callback,
-//         }
-//     }
+    fn on_start_talking(&self, ssrc: types::Ssrc) {
+        let user_id = self.user_id_from_ssrc(ssrc);
+        if let Some(user_id) = user_id {
+            self.voice_activity_events_sender
+                .send(VoiceActivityData {
+                    user_id,
+                    speaking: true,
+                })
+                .unwrap();
+        }
+    }
 
-//     fn on_user_join(
-//         &self,
-//         ssrc: types::Ssrc,
-//         user_id: types::UserId,
-//         audio_callback: types::AudioCallback,
-//     ) {
-//         let buffer_mutex = self.ssrc_to_user_voice_data.clone();
-//         let mut ssrc_to_user_voice_data = buffer_mutex.lock().unwrap();
-//         if let Some(user_voice_data) = ssrc_to_user_voice_data.get_mut(&ssrc) {
-//             assert!(user_voice_data.user_id == user_id);
-//             user_voice_data.on_start_talking();
-//         }
-//         ssrc_to_user_voice_data.insert(
-//             ssrc,
-//             voice_buffer::VoiceBufferForUser::new(user_id, audio_callback),
-//         );
-//     }
+    fn on_audio(
+        &self,
+        audio: &Vec<DiscordAudioSample>,
+        timestamp: DiscordRtcTimestamp,
+        ssrc: types::Ssrc,
+    ) {
+        if let Some(user_id) = self.user_id_from_ssrc(ssrc) {
+            self.audio_events_sender
+                .send(DiscordVoiceData {
+                    user_id,
+                    audio: audio.clone(),
+                    timestamp,
+                })
+                .unwrap();
+        }
+    }
 
-//     fn on_start_talking(&self, ssrc: types::Ssrc) {
-//         self._with_ssrc(ssrc, |user_voice_data| {
-//             user_voice_data.on_start_talking();
+    /// Fired when a user stops talking.  Here, "stops talking" means
+    /// the songbird driver has noticed 5 continuous packets (100ms) of silence.
+    fn on_stop_talking(&self, ssrc: types::Ssrc) {
+        if let Some(user_id) = self.user_id_from_ssrc(ssrc) {
+            self.voice_activity_events_sender
+                .send(VoiceActivityData {
+                    user_id,
+                    speaking: false,
+                })
+                .unwrap();
+        }
+    }
 
-//             self._fire_callback(api_types::VoiceChannelEvent::VoiceActivity(
-//                 api_types::VoiceActivityData {
-//                     user_id: user_voice_data.user_id,
-//                     speaking: true,
-//                 },
-//             ))
-//         });
-//     }
+    /// Fired when a user leaves the voice channel.
+    fn on_user_leave(&self, user_id: types::UserId) {
+        // we don't need to remove the SSRC from the map, since
+        // if another user comes in with that SSRC, we'll just
+        // overwrite the old user ID with the new one.
+        //
+        // Also, there's a chance that we might get other events
+        // for this user after they leave, so we don't want to
+        // remove them from the map just yet.
+        self.user_api_events_sender
+            .send(api_types::VoiceChannelEvent::UserJoin(
+                api_types::UserJoinData {
+                    user_id,
+                    joined: false,
+                },
+            ))
+            .unwrap();
+    }
 
-//     fn on_audio(&self, ssrc: types::Ssrc, audio: &Vec<types::AudioSample>) {
-//         self._with_ssrc(ssrc, |user_voice_data| {
-//             user_voice_data.push(audio);
-//         });
-//     }
+    fn on_driver_connect(&self, connect_data: api_types::ConnectData) {
+        self.user_api_events_sender
+            .send(api_types::VoiceChannelEvent::Connect(connect_data))
+            .unwrap();
+    }
 
-//     fn on_stop_talking(&self, ssrc: types::Ssrc) {
-//         // set timer to go off in 500ms, and if speaking is still
-//         // false then flush the buffer.
-//         self._with_ssrc(ssrc, |user_voice_data| {
-//             user_voice_data.on_stop_talking();
-//             self._fire_callback(api_types::VoiceChannelEvent::VoiceActivity(
-//                 api_types::VoiceActivityData {
-//                     user_id: user_voice_data.user_id,
-//                     speaking: false,
-//                 },
-//             ))
-//         });
-//     }
+    fn on_driver_disconnect(&self, disconnect_data: api_types::DisconnectData) {
+        self.user_api_events_sender
+            .send(api_types::VoiceChannelEvent::Disconnect(disconnect_data))
+            .unwrap();
+    }
 
-//     fn on_user_leave(&self, user_id: types::UserId) {
-//         let buffer_mutex = self.ssrc_to_user_voice_data.clone();
-//         let mut ssrc_to_voice_buffer = buffer_mutex.lock().unwrap();
-//         ssrc_to_voice_buffer.retain(|_, user_voice_data| user_voice_data.user_id != user_id);
+    fn on_driver_reconnect(&self, connect_data: api_types::ConnectData) {
+        self.user_api_events_sender
+            .send(api_types::VoiceChannelEvent::Reconnect(connect_data))
+            .unwrap();
+    }
 
-//         self._fire_callback(api_types::VoiceChannelEvent::UserJoin(
-//             api_types::UserJoinData {
-//                 user_id,
-//                 joined: false,
-//             },
-//         ));
-//     }
+    fn user_id_from_ssrc(&self, ssrc: types::Ssrc) -> Option<types::UserId> {
+        self.ssrc_to_user_id.read().unwrap().get(&ssrc).copied()
+    }
+}
 
-//     fn on_driver_connect(&self, connect_data: &api_types::ConnectData) {
-//         self._fire_callback(api_types::VoiceChannelEvent::Connect(connect_data.clone()));
-//     }
+struct MyEventHandler<T>
+where
+    T: Fn(&songbird::EventContext, &Arc<PacketHandler>) + Send + Sync,
+{
+    handler: T,
+    packet_handler: Arc<PacketHandler>,
+}
 
-//     fn on_driver_disconnect(&self, disconnect_data: &api_types::DisconnectData) {
-//         self._fire_callback(api_types::VoiceChannelEvent::Disconnect(
-//             disconnect_data.clone(),
-//         ));
-//     }
+impl<T> MyEventHandler<T>
+where
+    T: Fn(&songbird::EventContext, &Arc<PacketHandler>) + Send + Sync,
+{
+    fn new(packet_handler: Arc<PacketHandler>, handler: T) -> Self {
+        Self {
+            packet_handler,
+            handler,
+        }
+    }
+}
 
-//     fn on_driver_reconnect(&self, reconnect_data: &api_types::ConnectData) {
-//         self._fire_callback(api_types::VoiceChannelEvent::Reconnect(
-//             reconnect_data.clone(),
-//         ));
-//     }
+#[async_trait]
+impl<T> songbird::EventHandler for MyEventHandler<T>
+where
+    T: Fn(&songbird::EventContext, &Arc<PacketHandler>) + Send + Sync,
+{
+    async fn act(&self, ctx: &songbird::EventContext<'_>) -> Option<songbird::Event> {
+        (self.handler)(ctx, &self.packet_handler);
+        None
+    }
+}
 
-//     fn _with_ssrc(&self, ssrc: types::Ssrc, f: impl FnOnce(&mut voice_buffer::VoiceBufferForUser)) {
-//         let buffer_mutex = self.ssrc_to_user_voice_data.clone();
-//         let mut ssrc_to_voice_buffer = buffer_mutex.lock().unwrap();
-//         if let Some(user_voice_data) = ssrc_to_voice_buffer.get_mut(&ssrc) {
-//             f(user_voice_data);
-//         } else {
-//             // This is used when we're first starting to suppress errors
-//             // from users who were talking before we joined the channel.
-//             // It will only suppress errors for a single user, so there still
-//             // will be some noise if multiple users are talking simultaneously
-//             // when we join the channel, but that's ok.
-//             if ssrc_to_voice_buffer.is_empty() {
-//                 return;
-//             }
-//             eprintln!("no buffer for ssrc {}", ssrc);
-//         }
-//     }
+pub(crate) async fn register_events(handler: &Arc<PacketHandler>, driver: &mut songbird::Driver) {
+    // event handlers for the songbird driver
+    driver.add_global_event(
+        songbird::CoreEvent::SpeakingStateUpdate.into(),
+        MyEventHandler {
+            packet_handler: handler.clone(),
+            handler: |ctx, my_handler| {
+                if let EventContext::SpeakingStateUpdate(Speaking {
+                    speaking,
+                    ssrc,
+                    user_id,
+                    ..
+                }) = ctx
+                {
+                    // user are assigned an SSRC when they start speaking.  We need
+                    // to note this and map it to a user ID.
 
-//     fn _fire_callback(&self, event: api_types::VoiceChannelEvent) {
-//         let callback_copy = self.event_callback.clone();
-//         task::spawn(async move {
-//             callback_copy(event);
-//         });
-//     }
+                    if speaking.microphone() {
+                        // only look at users who are speaking using the microphone
+                        // (the alternative is sharing their screen, which we ignore)
 
-//     /// Fires on receipt of a voice packet from another stream in the voice call.
-//     ///
-//     /// As RTP packets do not map to Discord's notion of users, SSRCs must be mapped
-//     /// back using the user IDs seen through client connection, disconnection,
-//     /// or speaking state update.
-//     /// Handles these events:
-//     ///
-//     /// [`SpeakingUpdate`]: crate::events::CoreEvent::SpeakingUpdate
-//     /// Fires when a source starts speaking, or stops speaking
-//     /// (*i.e.*, 5 consecutive silent frames).
-//     ///
-//     /// [`SpeakingStateUpdate`]: crate::events::CoreEvent::SpeakingStateUpdate
-//     /// Speaking state update, typically describing how another voice
-//     /// user is transmitting audio data. Clients must send at least one such
-//     /// packet to allow SSRC/UserID matching.
-//     ///
-//     /// Fired on receipt of a speaking state update from another host.
-//     ///
-//     /// Note: this will fire when a user starts speaking for the first time,
-//     /// or changes their capabilities.
-//     ///
-//     /// [`VoicePacket`]: crate::events::CoreEvent::VoicePacket
-//     /// Opus audio packet, received from another stream (detailed in `packet`).
-//     /// `payload_offset` contains the true payload location within the raw packet's `payload()`,
-//     /// if extensions or raw packet data are required.
-//     ///
-//     /// Valid audio data (`Some(audio)` where `audio.len >= 0`) contains up to 20ms of 16-bit stereo PCM audio
-//     /// at 48kHz, using native endianness. Songbird will not send audio for silent regions, these should
-//     /// be inferred using [`SpeakingUpdate`]s (and filled in by the user if required using arrays of zeroes).
-//     ///
-//     /// If `audio.len() == 0`, then this packet arrived out-of-order. If `None`, songbird was not configured
-//     /// to decode received packets.
-//     ///
-//     /// [`ClientDisconnect`]: crate::events::CoreEvent::ClientDisconnect
-//     ///
-//     /// Fired whenever a client disconnects.
-//     pub async fn act(&self, ctx: &types::MyEventContext) -> Option<songbird::Event> {
-//         if self.maybe_log_file_mutex.is_some() {
-//             let log_file_mutex = self.maybe_log_file_mutex.as_ref().unwrap().clone();
-//             let mut log_file = log_file_mutex.lock().unwrap();
-//             let j = serde_json::to_string(&ctx).unwrap();
-//             log_file.write_all(j.as_bytes()).unwrap();
-//         }
+                        if let Some(user_id) = user_id {
+                            my_handler.on_user_join(*ssrc, user_id.0);
+                        } else {
+                            eprintln!("No user_id for speaking state update");
+                        }
+                    }
+                }
+            },
+        },
+    );
+    driver.add_global_event(
+        songbird::CoreEvent::SpeakingUpdate.into(),
+        MyEventHandler {
+            packet_handler: handler.clone(),
+            handler: |ctx, my_handler| {
+                if let EventContext::SpeakingUpdate(SpeakingUpdateData { ssrc, speaking, .. }) = ctx
+                {
+                    // Called when a user starts or stops speaking.
+                    if *speaking {
+                        my_handler.on_start_talking(*ssrc);
+                    } else {
+                        my_handler.on_stop_talking(*ssrc);
+                    }
+                }
+            },
+        },
+    );
+    driver.add_global_event(
+        songbird::CoreEvent::VoicePacket.into(),
+        MyEventHandler {
+            packet_handler: handler.clone(),
+            handler: |ctx, my_handler| {
+                if let EventContext::VoicePacket(VoiceData { audio, packet, .. }) = ctx {
+                    // An event which fires for every received audio packet,
+                    // containing the decoded data.
+                    if let Some(audio) = audio {
+                        my_handler.on_audio(audio, packet.timestamp.0, packet.ssrc);
+                    }
+                }
+            },
+        },
+    );
+    driver.add_global_event(
+        songbird::CoreEvent::ClientDisconnect.into(),
+        MyEventHandler {
+            packet_handler: handler.clone(),
+            handler: |ctx, my_handler| {
+                if let EventContext::ClientDisconnect(
+                    songbird::model::payload::ClientDisconnect { user_id, .. },
+                ) = ctx
+                {
+                    // Called when a user leaves the voice channel.
+                    my_handler.on_user_leave(user_id.0);
+                }
+            },
+        },
+    );
+    driver.add_global_event(
+        songbird::CoreEvent::DriverConnect.into(),
+        MyEventHandler {
+            packet_handler: handler.clone(),
+            handler: |ctx, my_handler| {
+                if let EventContext::DriverConnect(ConnectData {
+                    guild_id,
+                    channel_id,
+                    server,
+                    session_id,
+                    ..
+                }) = ctx
+                {
+                    my_handler.on_driver_connect(api_types::ConnectData {
+                        guild_id: guild_id.0,
+                        channel_id: channel_id.map(|c| c.0),
+                        session_id: session_id.to_string(),
+                        server: server.to_string(),
+                    })
+                }
+            },
+        },
+    );
+    driver.add_global_event(
+        songbird::CoreEvent::DriverDisconnect.into(),
+        MyEventHandler {
+            packet_handler: handler.clone(),
+            handler: |ctx, my_handler| {
+                if let EventContext::DriverDisconnect(DisconnectData {
+                    kind,
+                    reason,
+                    channel_id,
+                    guild_id,
+                    session_id,
+                    ..
+                }) = ctx
+                {
+                    my_handler.on_driver_disconnect(api_types::DisconnectData {
+                        kind: api_types::DisconnectKind::from(*kind),
+                        reason: reason.map(|r| api_types::DisconnectReason::from(r)),
+                        channel_id: channel_id.map(|c| c.0),
+                        guild_id: guild_id.0,
+                        session_id: session_id.to_string(),
+                    })
+                }
+            },
+        },
+    );
+    driver.add_global_event(
+        songbird::CoreEvent::DriverReconnect.into(),
+        MyEventHandler {
+            packet_handler: handler.clone(),
+            handler: |ctx, my_handler| {
+                if let EventContext::DriverReconnect(ConnectData {
+                    guild_id,
+                    channel_id,
+                    server,
+                    session_id,
+                    ..
+                }) = ctx
+                {
+                    my_handler.on_driver_reconnect(api_types::ConnectData {
+                        guild_id: guild_id.0,
+                        channel_id: channel_id.map(|c| c.0),
+                        session_id: session_id.to_string(),
+                        server: server.to_string(),
+                    })
+                }
+            },
+        },
+    );
+}
 
-//         use types::MyEventContext as Ctx;
-//         match ctx {
-//             Ctx::SpeakingStateUpdate(songbird::model::payload::Speaking {
-//                 speaking,
-//                 ssrc,
-//                 user_id,
-//                 ..
-//             }) => {
-//                 // Discord voice calls use RTP, where every sender uses a randomly allocated
-//                 // *Synchronisation Source* (SSRC) to allow receivers to tell which audio
-//                 // stream a received packet belongs to. As this number is not derived from
-//                 // the sender's user_id, only Discord Voice Gateway messages like this one
-//                 // inform us about which random SSRC a user has been allocated. Future voice
-//                 // packets will contain *only* the SSRC.
-//                 //
-//                 // You can implement logic here so that you can differentiate users'
-//                 // SSRCs and map the SSRC to the User ID and maintain this state.
-//                 // Using this map, you can map the `ssrc` in `voice_packet`
-//                 // to the user ID and handle their audio packets separately.
-//                 // println!(
-//                 //     "Speaking state update: user {:?} has SSRC {:?}, using {:?}",
-//                 //     user_id, ssrc, speaking,
-//                 // );
-//                 // only look at users who are speaking using the microphone
-//                 // (the alternative is sharing their screen, which we ignore)
-//                 if speaking.microphone() {
-//                     // make sure we have a buffer for this user
-//                     if let Some(user_id) = user_id {
-//                         let callback = self.audio_complete_callback.clone();
-//                         // we need to copy this so it has an independent lifetime
-//                         let user_id_copy = user_id.0;
-//                         self.on_user_join(
-//                             *ssrc,
-//                             user_id.0,
-//                             // the user ID passed from voice_buffer is always 0, since
-//                             // it doesn't know it.  Inject it here.
-//                             Arc::new(move |_, audio| (callback)(user_id_copy, audio)),
-//                         );
-//                     } else {
-//                         eprintln!("No user_id for speaking state update");
-//                     }
-//                 }
-//             }
-//             Ctx::SpeakingUpdate(data) => {
-//                 // You can implement logic here which reacts to a user starting
-//                 // or stopping speaking, and to map their SSRC to User ID.
-//                 // println!(
-//                 //     "Source {} has {} speaking.",
-//                 //     data.ssrc,
-//                 //     if data.speaking { "started" } else { "stopped" },
-//                 // );
-//                 if data.speaking {
-//                     self.on_start_talking(data.ssrc);
-//                 } else {
-//                     // user stopped speaking, so fire off handler
-//                     // to flush the buffer.
-//                     self.on_stop_talking(data.ssrc);
-//                 }
-//             }
-//             Ctx::VoicePacket(data) => {
-//                 // An event which fires for every received audio packet,
-//                 // containing the decoded data.
-//                 self.on_audio(data.ssrc, &data.audio);
-//             }
+impl api_types::DisconnectKind {
+    fn from(kind: DisconnectKind) -> api_types::DisconnectKind {
+        match kind {
+            DisconnectKind::Connect => api_types::DisconnectKind::Connect,
+            DisconnectKind::Reconnect => api_types::DisconnectKind::Reconnect,
+            DisconnectKind::Runtime => api_types::DisconnectKind::Runtime,
+            _ => api_types::DisconnectKind::Unknown,
+        }
+    }
+}
 
-//             Ctx::ClientDisconnect(songbird::model::payload::ClientDisconnect {
-//                 user_id, ..
-//             }) => {
-//                 // You can implement your own logic here to handle a user who has left the
-//                 // voice channel e.g., finalise processing of statistics etc.
-//                 // You will typically need to map the User ID to their SSRC; observed when
-//                 // first speaking.
-//                 self.on_user_leave(user_id.0);
-//             }
-//             Ctx::DriverConnect(connect_data) => {
-//                 self.on_driver_connect(connect_data);
-//             }
-//             Ctx::DriverDisconnect(disconnect_data) => {
-//                 self.on_driver_disconnect(disconnect_data);
-//             }
-//             Ctx::DriverReconnect(connect_data) => self.on_driver_reconnect(connect_data),
-//         }
-
-//         None
-//     }
-// }
+impl api_types::DisconnectReason {
+    fn from(reason: DisconnectReason) -> api_types::DisconnectReason {
+        match reason {
+            DisconnectReason::AttemptDiscarded => api_types::DisconnectReason::AttemptDiscarded,
+            DisconnectReason::Internal => api_types::DisconnectReason::Internal,
+            DisconnectReason::Io => api_types::DisconnectReason::Io,
+            DisconnectReason::ProtocolViolation => api_types::DisconnectReason::ProtocolViolation,
+            DisconnectReason::TimedOut => api_types::DisconnectReason::TimedOut,
+            DisconnectReason::WsClosed(code) => {
+                api_types::DisconnectReason::WsClosed(code.map(|c| c as u32))
+            }
+            _ => api_types::DisconnectReason::Unknown,
+        }
+    }
+}

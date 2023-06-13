@@ -8,8 +8,6 @@ mod events {
 }
 mod model {
     pub(crate) mod audio_buffer;
-    pub(crate) mod downsampler;
-    pub(crate) mod transcript;
     pub(crate) mod types;
     pub(crate) mod voice_activity;
     pub(crate) mod whisper;

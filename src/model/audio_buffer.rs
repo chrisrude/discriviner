@@ -9,27 +9,13 @@ use crate::events::audio::{AudioBuffer, AudioBufferForUser, DiscordVoiceData};
 
 use super::types;
 
-// this takes advantage of the ratio between the two sample rates
-// being a whole number. If this is not the case, we'll need to
-// do some more complicated resampling.
-const BITRATE_CONVERSION_RATIO: usize =
-    types::DISCORD_SAMPLES_PER_SECOND / types::WHISPER_SAMPLES_PER_SECOND;
-
-// do the conversion, we'll take the first sample, and then
-// simply skip over the next (BITRATE_CONVERSION_RATIO-1)
-// samples
-//
-// while converting the bitrate we'll also convert the audio
-// from stereo to mono, so we'll do everything in pairs.
-const GROUP_RATIO: usize = BITRATE_CONVERSION_RATIO * types::DISCORD_AUDIO_CHANNELS;
-
 impl AudioBuffer {
     fn new() -> Self {
         Self {
             buffer: VecDeque::with_capacity(types::WHISPER_AUDIO_BUFFER_SIZE),
-            head_timestamp: 0,
-            last_transcription_timestamp: 0,
-            last_write_timestamp: 0,
+            head_timestamp: std::num::Wrapping(0), // todo: sentinel value?
+            last_transcription_timestamp: std::num::Wrapping(0),
+            last_write_timestamp: std::num::Wrapping(0),
         }
     }
 }
@@ -91,27 +77,26 @@ struct AudioBufferManager {
 //     }
 // }
 
-// fn resample_audio_from_discord_to_whisper(
-//     audio: Arc<Vec<types::DiscordAudioSample>>,
-//     audio_out: &[types::WhisperAudioSample; types::WHISPER_AUDIO_BUFFER_SIZE],
-// ) {
-//     assert!(audio.len() % GROUP_RATIO == 0);
-//     assert!(audio_out.len() == audio.len() / GROUP_RATIO);
+const DISCORD_AUDIO_MAX_VALUE_TWO_SAMPLES: types::WhisperAudioSample =
+    types::DISCORD_AUDIO_MAX_VALUE * types::DISCORD_AUDIO_CHANNELS as types::WhisperAudioSample;
 
-//     let audio_max: types::WhisperAudioSample = types::DiscordAudioSample::MAX
-//         as types::WhisperAudioSample
-//         * types::DISCORD_AUDIO_CHANNELS as types::WhisperAudioSample;
-
-//     for (i, samples) in audio.chunks_exact(GROUP_RATIO).enumerate() {
-//         // sum the channel data, and divide by the max value possible to
-//         // get a value between -1.0 and 1.0
-//         audio_out[i] = samples
-//             .iter()
-//             .map(|x| *x as types::WhisperAudioSample)
-//             .sum::<types::WhisperAudioSample>()
-//             / audio_max;
-//     }
-// }
+fn resample_audio_from_discord_to_whisper(
+    audio: &[types::DiscordAudioSample; types::DISCORD_PACKET_GROUP_SIZE],
+    audio_out: &mut [types::WhisperAudioSample; types::WHISPER_PACKET_GROUP_SIZE],
+) {
+    for (i, samples) in audio
+        .chunks_exact(types::BITRATE_CONVERSION_RATIO)
+        .enumerate()
+    {
+        // sum the channel data, and divide by the max value possible to
+        // get a value between -1.0 and 1.0
+        audio_out[i] = samples
+            .iter()
+            .map(|x| *x as types::WhisperAudioSample)
+            .sum::<types::WhisperAudioSample>()
+            / DISCORD_AUDIO_MAX_VALUE_TWO_SAMPLES;
+    }
+}
 
 // Called once we have a full audio clip from a user.
 //     /// This is called on an event handling thread, so do not do anything
