@@ -1,11 +1,11 @@
 use std::{
     collections::{HashMap, VecDeque},
-    sync::Arc,
+    sync::Mutex,
 };
 
 use tokio::sync;
 
-use crate::events::audio::{AudioBuffer, DiscordVoiceData};
+use crate::events::audio::{AudioBuffer, AudioBufferForUser, DiscordVoiceData};
 
 use super::types;
 
@@ -23,17 +23,28 @@ const BITRATE_CONVERSION_RATIO: usize =
 // from stereo to mono, so we'll do everything in pairs.
 const GROUP_RATIO: usize = BITRATE_CONVERSION_RATIO * types::DISCORD_AUDIO_CHANNELS;
 
-// impl AudioBuffer {
-//     fn new() -> Self {
-//         Self {
-//             user_id: 0,
-//             buffer: VecDeque::with_capacity(types::WHISPER_AUDIO_BUFFER_SIZE),
-//             head_timestamp: 0,
-//             last_write_timestamp: 0,
-//             last_tokens: VecDeque::with_capacity(types::TOKENS_TO_KEEP),
-//         }
-//     }
-// }
+impl AudioBuffer {
+    fn new() -> Self {
+        Self {
+            buffer: VecDeque::with_capacity(types::WHISPER_AUDIO_BUFFER_SIZE),
+            head_timestamp: 0,
+            last_transcription_timestamp: 0,
+            last_write_timestamp: 0,
+        }
+    }
+}
+
+impl AudioBufferForUser {
+    fn new(user_id: types::UserId) -> Self {
+        Self {
+            user_id,
+            buffers: [AudioBuffer::new(), AudioBuffer::new()],
+            current_write_buffer: Mutex::new(0),
+            last_tokens: VecDeque::with_capacity(types::TOKENS_TO_KEEP),
+            worker_task: Mutex::new(None),
+        }
+    }
+}
 
 /// Handles a set of audio buffers, one for each user who is
 /// talking in the conversation.

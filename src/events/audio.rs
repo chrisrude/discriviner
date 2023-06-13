@@ -19,9 +19,9 @@ pub(crate) struct DiscordVoiceData {
     pub ssrc: u32,
 }
 
-pub struct AudioBufferForUser {
+pub(crate) struct AudioBufferForUser {
     /// User ID of the user that this buffer is for.
-    user_id: u64,
+    pub user_id: u64,
 
     /// The buffers themselves.  We use two buffers so that
     /// we can write without blocking the transcription worker.
@@ -29,7 +29,7 @@ pub struct AudioBufferForUser {
     /// Only the current_write_buffer can be written to.
     /// The current_write_buffer mutex must be held when
     /// writing to the buffer or changing the active buffer.
-    buffers: [AudioBuffer; 2],
+    pub buffers: [AudioBuffer; 2],
 
     /// The index of the buffer we're currently writing to.
     /// (either 0 or 1).
@@ -39,30 +39,30 @@ pub struct AudioBufferForUser {
     ///
     /// The lock must be held when writing to the buffer or
     /// changing the active buffer.
-    current_write_buffer: Mutex<usize>,
+    pub current_write_buffer: Mutex<usize>,
 
     /// The most recent tokens we've seen from this
     /// user.  Used to help inform the decoder.
-    last_tokens: std::collections::VecDeque<WhisperToken>, // TOKENS_TO_KEEP
+    pub last_tokens: std::collections::VecDeque<WhisperToken>, // TOKENS_TO_KEEP
 
     // worker used for transcription
-    worker_task: Mutex<Option<JoinHandle<()>>>,
+    pub worker_task: Mutex<Option<JoinHandle<()>>>,
 }
 
 pub struct AudioBuffer {
     /// Audio data lives here.
-    buffer: std::collections::VecDeque<WhisperAudioSample>,
+    pub buffer: std::collections::VecDeque<WhisperAudioSample>,
 
     /// The timestamp of the first sample in the buffer.
     /// Taken from the RTC packet.
-    head_timestamp: DiscordRtcTimestamp,
+    pub head_timestamp: DiscordRtcTimestamp,
 
     /// The timestamp of the last sample in the buffer.
-    last_write_timestamp: DiscordRtcTimestamp,
+    pub last_write_timestamp: DiscordRtcTimestamp,
 
     /// The timestamp of the most recent sample we've sent
     /// to the transcription worker.
-    last_transcription_timestamp: DiscordRtcTimestamp,
+    pub last_transcription_timestamp: DiscordRtcTimestamp,
 }
 
 pub struct VoiceActivityData {
