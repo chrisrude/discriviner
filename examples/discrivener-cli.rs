@@ -99,7 +99,7 @@ async fn tokio_main(cli: Cli) {
             cli.voice_token.as_str(),
         )
         .await;
-    if let Ok(_) = connection_result {
+    if connection_result.is_ok() {
         println!("Joined voice channel");
     } else {
         println!("Error joining voice channel");

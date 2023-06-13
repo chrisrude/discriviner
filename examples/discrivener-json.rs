@@ -1,6 +1,6 @@
 use clap::Parser;
 use discrivener::api::api_methods;
-use serde_json;
+
 use std::sync::Arc;
 use tokio::signal;
 
