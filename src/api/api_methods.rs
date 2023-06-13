@@ -68,16 +68,16 @@ impl Discrivener {
             event_callback,
         ));
 
-        let discrivener = Self {
+        
+
+        Self {
             api_task,
             audio_buffer_manager_task,
             driver,
             handler,
             voice_activity_task,
             whisper,
-        };
-
-        discrivener
+        }
     }
 
     pub async fn connect(

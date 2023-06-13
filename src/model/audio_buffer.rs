@@ -81,10 +81,10 @@ impl AudioBufferManager {
     async fn loop_forever(&mut self) {
         loop {
             tokio::select! {
-                Some(voice_data) = self.rx_queue_voice.recv() => {
+                Some(_voice_data) = self.rx_queue_voice.recv() => {
                     // todo: self.handle_voice_data(voice_data).await;
                 }
-                Some(user_id) = self.rx_queue_silent_user_events.recv() => {
+                Some(_user_id) = self.rx_queue_silent_user_events.recv() => {
                     // todo: self.handle_silent_user_event(user_id).await;
                 }
             }
