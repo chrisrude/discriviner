@@ -294,7 +294,7 @@ pub(crate) async fn register_events(handler: &Arc<PacketHandler>, driver: &mut s
                 {
                     my_handler.on_driver_disconnect(api_types::DisconnectData {
                         kind: api_types::DisconnectKind::from(*kind),
-                        reason: reason.map(|r| api_types::DisconnectReason::from(r)),
+                        reason: reason.map(api_types::DisconnectReason::from),
                         channel_id: channel_id.map(|c| c.0),
                         guild_id: guild_id.0,
                         session_id: session_id.to_string(),

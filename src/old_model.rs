@@ -37,13 +37,13 @@ impl Model {
 
         let whisper = whisper::Whisper::load(model_path);
 
-        let model = Self {
+        
+
+        Self {
             driver,
             handler,
             whisper,
-        };
-
-        model
+        }
     }
 
     pub async fn connect(
