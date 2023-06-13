@@ -154,18 +154,6 @@ where
     packet_handler: Arc<PacketHandler>,
 }
 
-impl<T> MyEventHandler<T>
-where
-    T: Fn(&songbird::EventContext, &Arc<PacketHandler>) + Send + Sync,
-{
-    fn new(packet_handler: Arc<PacketHandler>, handler: T) -> Self {
-        Self {
-            packet_handler,
-            handler,
-        }
-    }
-}
-
 #[async_trait]
 impl<T> songbird::EventHandler for MyEventHandler<T>
 where

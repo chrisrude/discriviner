@@ -37,7 +37,12 @@ impl AudioBufferForUser {
 pub(crate) struct AudioBufferManager {
     // we'll have a single task which monitors this queue for new
     // audio data and then pushes it into the appropriate buffer.
-    rx_queue: sync::mpsc::UnboundedReceiver<DiscordVoiceData>,
+    rx_queue_voice: sync::mpsc::UnboundedReceiver<DiscordVoiceData>,
+
+    // this queue is used to notify the audio buffer manager that
+    // a user has stopped talking.  We'll use this to know when
+    // to trigger our final transcription.
+    rx_queue_silent_user_events: sync::mpsc::UnboundedReceiver<types::UserId>,
 
     // these are the buffers which we've assigned to a user
     // in the conversation.  We'll keep them around until the
@@ -53,10 +58,12 @@ pub(crate) struct AudioBufferManager {
 
 impl AudioBufferManager {
     pub fn monitor(
-        rx_queue: sync::mpsc::UnboundedReceiver<DiscordVoiceData>,
+        rx_queue_voice: sync::mpsc::UnboundedReceiver<DiscordVoiceData>,
+        rx_queue_silent_user_events: sync::mpsc::UnboundedReceiver<types::UserId>,
     ) -> task::JoinHandle<()> {
         let mut audio_buffer_manager = AudioBufferManager {
-            rx_queue,
+            rx_queue_voice,
+            rx_queue_silent_user_events,
             active_buffers: HashMap::new(),
             reserve_buffers: VecDeque::new(),
         };
@@ -72,9 +79,15 @@ impl AudioBufferManager {
     }
 
     async fn loop_forever(&mut self) {
-        while let Some(_audio_data) = self.rx_queue.recv().await {
-            // get a slice to store data into.
-            // todo: all the things
+        loop {
+            tokio::select! {
+                Some(voice_data) = self.rx_queue_voice.recv() => {
+                    // todo: self.handle_voice_data(voice_data).await;
+                }
+                Some(user_id) = self.rx_queue_silent_user_events.recv() => {
+                    // todo: self.handle_silent_user_event(user_id).await;
+                }
+            }
         }
     }
 }

@@ -38,7 +38,7 @@ pub const MIN_AUDIO_THRESHOLD_MS: u32 = 500;
 /// use them to seed the next transcription.  This is per-user.
 pub const TOKENS_TO_KEEP: usize = 1024;
 
-// this takes advantage of the ratio between the two sample rates
+pub const USER_SILENCE_TIMEOUT_MS: u64 = 2000;
 
 pub type DiscordAudioSample = i16;
 pub type DiscordRtcTimestamp = Wrapping<u32>;

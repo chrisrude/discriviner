@@ -78,7 +78,7 @@ async fn tokio_main(cli: Cli) {
             api_types::VoiceChannelEvent::Disconnect(_) => {
                 println!("Connection status: {}", "disconnected".bright_red());
             }
-            api_types::VoiceChannelEvent::ChannelSilent(silent) => {
+            api_types::VoiceChannelEvent::SilentChannel(silent) => {
                 if silent {
                     println!("Channel is silent");
                 } else {

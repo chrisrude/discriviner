@@ -1,3 +1,4 @@
+use crate::api::api_types::VoiceChannelEvent;
 use crate::events::audio::VoiceActivityData;
 use crate::model::types::UserId;
 use std::collections;
@@ -8,12 +9,12 @@ use tokio::time;
 use tokio::time::Duration;
 use tokio::time::Instant;
 
-struct VoiceActivity {
+pub(crate) struct VoiceActivity {
     last_time_by_user: collections::HashMap<UserId, (bool, time::Instant)>,
     silence_list: VecDeque<(Instant, UserId, Instant)>,
     rx_queue: sync::mpsc::UnboundedReceiver<VoiceActivityData>,
     speaking_users: collections::HashSet<UserId>,
-    tx_queue_silent_channel: sync::mpsc::UnboundedSender<bool>,
+    tx_queue_silent_channel: sync::mpsc::UnboundedSender<VoiceChannelEvent>,
     tx_queue_silent_user: sync::mpsc::UnboundedSender<UserId>,
     user_silence_timeout: Duration,
 }
@@ -29,10 +30,10 @@ struct VoiceActivity {
 impl VoiceActivity {
     const ONE_YEAR: Duration = Duration::from_secs(60 * 60 * 24 * 365);
 
-    pub async fn monitor(
+    pub(crate) fn monitor(
         rx_queue: sync::mpsc::UnboundedReceiver<VoiceActivityData>,
         user_silence_timeout: Duration,
-        tx_queue_silent_channel: sync::mpsc::UnboundedSender<bool>,
+        tx_queue_silent_channel: sync::mpsc::UnboundedSender<VoiceChannelEvent>,
         tx_queue_silent_user: sync::mpsc::UnboundedSender<UserId>,
     ) -> task::JoinHandle<()> {
         let mut voice_activity = Self {
@@ -79,13 +80,17 @@ impl VoiceActivity {
                         let was_empty = self.speaking_users.is_empty();
                         self.speaking_users.insert(activity.user_id);
                         if was_empty {
-                            self.tx_queue_silent_channel.send(false).unwrap();
+                            self.tx_queue_silent_channel.send(
+                                VoiceChannelEvent::SilentChannel(false)
+                            ).unwrap();
                         }
                     } else {
                         let was_someone_speaking = !self.speaking_users.is_empty();
                         self.speaking_users.remove(&activity.user_id);
                         if was_someone_speaking && self.speaking_users.is_empty() {
-                            self.tx_queue_silent_channel.send(true).unwrap();
+                            self.tx_queue_silent_channel.send(
+                                VoiceChannelEvent::SilentChannel(true)
+                            ).unwrap();
                         }
                     }
                 }
@@ -132,8 +137,7 @@ mod tests {
             Duration::from_millis(1),
             tx_silent_channel,
             tx_silent_user,
-        )
-        .await;
+        );
 
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
         assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
@@ -145,7 +149,11 @@ mod tests {
         })
         .unwrap();
 
-        assert!(!rx_silent_channel.recv().await.unwrap());
+        if let VoiceChannelEvent::SilentChannel(silent) = rx_silent_channel.recv().await.unwrap() {
+            assert!(!silent);
+        } else {
+            panic!("expected silent channel event");
+        }
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
         assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 
@@ -175,7 +183,11 @@ mod tests {
         })
         .unwrap();
 
-        assert!(rx_silent_channel.recv().await.unwrap());
+        if let VoiceChannelEvent::SilentChannel(silent) = rx_silent_channel.recv().await.unwrap() {
+            assert!(silent);
+        } else {
+            panic!("expected silent channel event");
+        }
         assert_eq!(rx_silent_user.recv().await.unwrap(), 2);
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
         assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
@@ -185,6 +197,7 @@ mod tests {
         voice_activity.await.unwrap();
     }
 
+    #[tokio::test]
     async fn test_voice_activity_with_interruption() {
         let (tx, rx) = sync::mpsc::unbounded_channel();
         let (tx_silent_channel, mut rx_silent_channel) = sync::mpsc::unbounded_channel();
@@ -194,8 +207,7 @@ mod tests {
             Duration::from_millis(10),
             tx_silent_channel,
             tx_silent_user,
-        )
-        .await;
+        );
 
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
         assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
@@ -207,7 +219,11 @@ mod tests {
         })
         .unwrap();
 
-        assert!(!rx_silent_channel.recv().await.unwrap());
+        if let VoiceChannelEvent::SilentChannel(silent) = rx_silent_channel.recv().await.unwrap() {
+            assert!(!silent);
+        } else {
+            panic!("expected silent channel event");
+        }
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
         assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 
@@ -245,7 +261,11 @@ mod tests {
         .unwrap();
 
         // we should NOT have fired a timeout for user 2 yet
-        assert!(rx_silent_channel.recv().await.unwrap());
+        if let VoiceChannelEvent::SilentChannel(silent) = rx_silent_channel.recv().await.unwrap() {
+            assert!(silent);
+        } else {
+            panic!("expected silent channel event");
+        }
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
         assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 
@@ -259,6 +279,11 @@ mod tests {
         // we should still not fire a timeout for user 2, even
         // after some delay
         tokio::time::sleep(Duration::from_millis(20)).await;
+        if let VoiceChannelEvent::SilentChannel(silent) = rx_silent_channel.recv().await.unwrap() {
+            assert!(!silent);
+        } else {
+            panic!("expected silent channel event");
+        }
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
         assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 

@@ -149,7 +149,7 @@ pub enum VoiceChannelEvent {
     Connect(ConnectData),
     Reconnect(ConnectData),
     Disconnect(DisconnectData),
-    ChannelSilent(bool),
+    SilentChannel(bool),
 }
 
 impl TranscribedMessage {

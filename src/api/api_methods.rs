@@ -1,19 +1,23 @@
-#![allow(unused_variables)]
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::api::api_types;
 use crate::events::audio::{DiscordVoiceData, VoiceActivityData};
-use crate::model::whisper;
+use crate::model::{types, voice_activity, whisper};
 use crate::packet_handler;
 
 use songbird::id::{ChannelId, GuildId, UserId};
 use songbird::ConnectionInfo;
+use tokio::task::JoinHandle;
 
 pub struct Discrivener {
+    // task which will fire API change events
+    api_task: JoinHandle<()>,
+    audio_buffer_manager_task: JoinHandle<()>,
     driver: songbird::Driver,
-    event_callback: std::sync::Arc<dyn Fn(api_types::VoiceChannelEvent) + Send + Sync>,
     handler: Arc<packet_handler::PacketHandler>,
     whisper: whisper::Whisper,
+    voice_activity_task: JoinHandle<()>,
 }
 
 impl Discrivener {
@@ -31,9 +35,21 @@ impl Discrivener {
         let (voice_activity_events_sender, voice_activity_events_receiver) =
             tokio::sync::mpsc::unbounded_channel::<VoiceActivityData>();
 
+        let (silent_user_events_sender, silent_user_events_receiver) =
+            tokio::sync::mpsc::unbounded_channel::<u64>();
+
+        let voice_activity_task = voice_activity::VoiceActivity::monitor(
+            voice_activity_events_receiver,
+            Duration::from_millis(types::USER_SILENCE_TIMEOUT_MS),
+            user_api_events_sender.clone(),
+            silent_user_events_sender,
+        );
+
         // the audio buffer manager gets the voice data
-        let audio_buffer_manager =
-            crate::model::audio_buffer::AudioBufferManager::monitor(audio_events_receiver);
+        let audio_buffer_manager_task = crate::model::audio_buffer::AudioBufferManager::monitor(
+            audio_events_receiver,
+            silent_user_events_receiver,
+        );
 
         let mut driver = songbird::Driver::new(config);
 
@@ -47,28 +63,23 @@ impl Discrivener {
 
         let whisper = whisper::Whisper::load(model_path);
 
-        Self {
-            driver,
+        let api_task = tokio::spawn(Self::start_api_task(
+            user_api_events_receiver,
             event_callback,
+        ));
+
+        let discrivener = Self {
+            api_task,
+            audio_buffer_manager_task,
+            driver,
             handler,
+            voice_activity_task,
             whisper,
-        }
+        };
+
+        discrivener
     }
 
-    /// Connect to a voice channel.
-    ///
-    /// channel_id:
-    /// ID of the voice channel to join
-    ///
-    /// This is not needed to establish a connection, but can be useful
-    /// for book-keeping.
-    /// URL of the voice websocket gateway server assigned to this call.
-    /// ID of the target voice channel's parent guild.
-    ///
-    /// Bots cannot connect to a guildless (i.e., direct message) voice call.
-    /// Unique string describing this session for validation/authentication purposes.
-    /// Ephemeral secret used to validate the above session.
-    /// UserID of this bot.
     pub async fn connect(
         &mut self,
         channel_id: u64,
@@ -91,5 +102,18 @@ impl Discrivener {
 
     pub fn disconnect(&mut self) {
         self.driver.leave();
+
+        // todo: shutdown queues and workers
+    }
+
+    async fn start_api_task(
+        mut user_api_events_receiver: tokio::sync::mpsc::UnboundedReceiver<
+            api_types::VoiceChannelEvent,
+        >,
+        event_callback: std::sync::Arc<dyn Fn(api_types::VoiceChannelEvent) + Send + Sync>,
+    ) {
+        while let Some(event) = user_api_events_receiver.recv().await {
+            event_callback(event);
+        }
     }
 }
