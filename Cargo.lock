@@ -437,7 +437,6 @@ dependencies = [
 name = "discrivener"
 version = "0.2.0"
 dependencies = [
- "bytes",
  "clap",
  "colored",
  "discrivener",

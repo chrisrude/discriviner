@@ -1,4 +1,5 @@
 use crate::api::api_types;
+use crate::model::types::UserId;
 use std::collections;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -42,7 +43,7 @@ impl Transcript {
             .join(" ")
     }
 
-    pub(crate) fn get_latest_text_for_user(&self, user_id: api_types::UserId) -> String {
+    pub(crate) fn get_latest_text_for_user(&self, user_id: UserId) -> String {
         // returns text from oldest to newest
         self.0
             .iter()

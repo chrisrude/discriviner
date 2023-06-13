@@ -22,13 +22,16 @@ pub const WHISPER_SAMPLES_PER_MILLISECOND: usize = WHISPER_SAMPLES_PER_SECOND / 
 // the total size of the buffer we'll use to store audio, in samples
 pub const WHISPER_AUDIO_BUFFER_SIZE: usize = WHISPER_SAMPLES_PER_SECOND * AUDIO_TO_RECORD_SECONDS;
 
+/// If an audio clip is less than this length, we'll ignore it.
+pub const MIN_AUDIO_THRESHOLD_MS: u32 = 500;
+
+/// keep this many tokens from previous transcriptions, and
+/// use them to seed the next transcription.  This is per-user.
+pub const TOKENS_TO_KEEP: usize = 1024;
+
 pub type DiscordAudioSample = i16;
-pub type WhisperAudioSample = f32;
-
+pub type DiscordRtcTimestamp = u32; // todo: this is a wraparound type, use that instead?
 pub type Ssrc = u32;
-
-pub(crate) struct DiscordVoiceData {
-    pub audio: Vec<DiscordAudioSample>,
-    pub timestamp: u32,
-    pub ssrc: u32,
-}
+pub type UserId = u64;
+pub type WhisperAudioSample = f32;
+pub type WhisperToken = i32;

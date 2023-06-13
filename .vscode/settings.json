@@ -5,6 +5,7 @@
         "downsampler",
         "downsamples",
         "guildless",
+        "oneshot",
         "ringbuf",
         "ssid",
         "Ssrc",

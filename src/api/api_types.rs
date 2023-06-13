@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
-pub type UserId = u64;
+pub type UserId = crate::model::types::UserId;
 
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, Serialize, Deserialize)]
 pub struct UserJoinData {
@@ -147,13 +147,6 @@ pub struct DisconnectData {
     pub session_id: String,
 }
 
-#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, Serialize, Deserialize)]
-pub struct VoiceActivityData {
-    /// Sent when a user begins speaking or stops speaking.
-    pub user_id: u64,
-    pub speaking: bool,
-}
-
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize)]
 pub enum VoiceChannelEvent {
     UserJoin(UserJoinData),
@@ -161,7 +154,6 @@ pub enum VoiceChannelEvent {
     Connect(ConnectData),
     Reconnect(ConnectData),
     Disconnect(DisconnectData),
-    VoiceActivity(VoiceActivityData),
     ChannelSilent(bool),
 }
 
