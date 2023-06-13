@@ -12,5 +12,4 @@ mod model {
     pub(crate) mod voice_activity;
     pub(crate) mod whisper;
 }
-mod old_model;
 mod packet_handler;

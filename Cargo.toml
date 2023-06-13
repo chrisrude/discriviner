@@ -18,6 +18,9 @@ version = "0.1.68"
 [dependencies.serde]
 version = "1.0.163"
 
+[dependencies.serde_json]
+version = "1.0.96"
+
 [dependencies.serde_with]
 version = "3.0.0"
 default-features = false

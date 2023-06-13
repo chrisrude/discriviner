@@ -442,6 +442,7 @@ dependencies = [
  "colored",
  "discrivener",
  "serde",
+ "serde_json",
  "serde_with",
  "songbird",
  "tokio",

@@ -3,14 +3,14 @@ use std::{
     sync::Mutex,
 };
 
-use tokio::sync;
+use tokio::{sync, task};
 
 use crate::events::audio::{AudioBuffer, AudioBufferForUser, DiscordVoiceData};
 
 use super::types;
 
 impl AudioBuffer {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             buffer: VecDeque::with_capacity(types::WHISPER_AUDIO_BUFFER_SIZE),
             head_timestamp: std::num::Wrapping(0), // todo: sentinel value?
@@ -34,10 +34,10 @@ impl AudioBufferForUser {
 
 /// Handles a set of audio buffers, one for each user who is
 /// talking in the conversation.
-struct AudioBufferManager {
+pub(crate) struct AudioBufferManager {
     // we'll have a single task which monitors this queue for new
     // audio data and then pushes it into the appropriate buffer.
-    rx_queue: sync::mpsc::Receiver<DiscordVoiceData>,
+    rx_queue: sync::mpsc::UnboundedReceiver<DiscordVoiceData>,
 
     // these are the buffers which we've assigned to a user
     // in the conversation.  We'll keep them around until the
@@ -51,31 +51,33 @@ struct AudioBufferManager {
     reserve_buffers: VecDeque<AudioBuffer>,
 }
 
-// impl AudioBufferManager {
-//     pub fn monitor(rx_queue: sync::mpsc::Receiver<DiscordVoiceData>) -> task::JoinHandle<()> {
-//         let audio_buffer_manager = AudioBufferManager {
-//             rx_queue,
-//             active_buffers: HashMap::new(),
-//             reserve_buffers: VecDeque::new(),
-//         };
-//         // pre-allocate some buffers
-//         for _ in 0..10 {
-//             audio_buffer_manager
-//                 .reserve_buffers
-//                 .push_back(AudioBuffer::new());
-//         }
-//         task::spawn(async move {
-//             audio_buffer_manager.loop_forever().await;
-//         })
-//     }
+impl AudioBufferManager {
+    pub fn monitor(
+        rx_queue: sync::mpsc::UnboundedReceiver<DiscordVoiceData>,
+    ) -> task::JoinHandle<()> {
+        let mut audio_buffer_manager = AudioBufferManager {
+            rx_queue,
+            active_buffers: HashMap::new(),
+            reserve_buffers: VecDeque::new(),
+        };
+        // pre-allocate some buffers
+        for _ in 0..10 {
+            audio_buffer_manager
+                .reserve_buffers
+                .push_back(AudioBuffer::new());
+        }
+        task::spawn(async move {
+            audio_buffer_manager.loop_forever().await;
+        })
+    }
 
-//     async fn loop_forever(&mut self) {
-//         while let Some(audio_data) = self.rx_queue.recv().await {
-//             // get a slice to store data into.
-//             // todo: all the things
-//         }
-//     }
-// }
+    async fn loop_forever(&mut self) {
+        while let Some(_audio_data) = self.rx_queue.recv().await {
+            // get a slice to store data into.
+            // todo: all the things
+        }
+    }
+}
 
 const DISCORD_AUDIO_MAX_VALUE_TWO_SAMPLES: types::WhisperAudioSample =
     types::DISCORD_AUDIO_MAX_VALUE * types::DISCORD_AUDIO_CHANNELS as types::WhisperAudioSample;
