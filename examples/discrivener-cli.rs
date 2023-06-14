@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tokio::signal;
 
 fn on_text(message: api_types::TranscribedMessage, log_performance: bool) {
-    if message.text_segments.is_empty() {
+    if message.segments.is_empty() {
         println!();
         return;
     }
@@ -22,16 +22,17 @@ fn on_text(message: api_types::TranscribedMessage, log_performance: bool) {
     }
 
     let mut first: bool = true;
-    for text_segment in message.text_segments {
+    for segment in message.segments {
+        // todo: color code based on probability
         if first {
             println!(
                 "{} says: {}",
                 message.user_id.to_string().bright_green(),
-                text_segment.text.bold(),
+                segment.text().bold(),
             );
             first = false;
         } else {
-            println!("\t\t\t {}", text_segment.text.bold());
+            println!("\t\t\t {}", segment.text().bold());
         }
     }
 }

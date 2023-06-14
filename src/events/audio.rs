@@ -28,7 +28,4 @@ pub(crate) struct TranscriptionRequest {
 }
 
 #[derive(Debug)]
-pub(crate) struct TranscriptionResponse {
-    pub message: crate::api::api_types::TranscribedMessage,
-    pub tokens: Vec<types::WhisperToken>,
-}
+pub(crate) struct TranscriptionResponse(pub crate::api::api_types::TranscribedMessage);

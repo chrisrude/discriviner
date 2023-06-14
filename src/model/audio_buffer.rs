@@ -1,11 +1,20 @@
-use std::collections::{HashMap, VecDeque};
+use std::{
+    collections::{HashMap, VecDeque},
+    time::Duration,
+};
 
 use tokio::{sync, task};
 use tokio_util::sync::CancellationToken;
 
-use crate::events::audio::{DiscordAudioData, TranscriptionRequest};
+use crate::{
+    api::api_types::TranscribedMessage,
+    events::audio::{DiscordAudioData, TranscriptionRequest, TranscriptionResponse},
+    model::types::WHISPER_SAMPLES_PER_MILLISECOND,
+};
 
-use super::types::{self, DiscordRtcTimestamp, UserId, WhisperAudioSample, WhisperToken};
+use super::types::{
+    self, DiscordRtcTimestamp, DiscordRtcTimestampInner, UserId, WhisperAudioSample, WhisperToken,
+};
 
 pub struct AudioBuffer {
     /// Audio data lives here.
@@ -36,11 +45,14 @@ impl AudioBuffer {
         }
     }
 
-    fn assign(&mut self, user_id: UserId) {
+    fn assign_to_user(&mut self, user_id: UserId) {
         self.head_timestamp = None;
         self.last_tokens.clear();
         self.user_id = Some(user_id);
     }
+
+    /////////////////////////////////////////////////
+    // adding audio to the buffer
 
     fn add_audio(
         &mut self,
@@ -54,24 +66,30 @@ impl AudioBuffer {
             self.head_timestamp.unwrap(),
             timestamp,
         );
-        let end = offset + Self::discord_audio_len_to_whisper_audio_len(discord_audio.len());
+        let end = offset + discord_audio.len() / types::BITRATE_CONVERSION_RATIO;
         if end > self.buffer.len() {
             // todo: drop audio instead of panicking?
             panic!("buffer overflow");
         }
 
-        while self.buffer.len() < offset {
-            self.buffer.push_back(0.0);
+        if self.buffer.len() > offset {
+            // todo: handle more gracefully?  Can songbird send us
+            // packets out of order?
+            panic!("received out-of-order packet")
+        }
+
+        if self.buffer.len() < offset {
+            let num_samples_to_insert = offset - self.buffer.len();
+            eprintln!(
+                "skip in audio, padding with silence for {} ms",
+                num_samples_to_insert / WHISPER_SAMPLES_PER_MILLISECOND
+            );
+            self.buffer.extend(
+                std::iter::repeat(types::WhisperAudioSample::default()).take(num_samples_to_insert),
+            );
         }
 
         self.resample_audio_from_discord_to_whisper(discord_audio);
-    }
-
-    fn discord_audio_len_to_whisper_audio_len(len: usize) -> usize {
-        // The Discord audio data is 16-bit stereo PCM at 48kHz.
-        // We want to convert this to 16-bit mono PCM at 16kHz.
-        // So we'll divide the length by 3.
-        len / types::BITRATE_CONVERSION_RATIO
     }
 
     fn rtc_timestamp_delta_to_whisper_audio_delta(
@@ -81,7 +99,15 @@ impl AudioBuffer {
         // The RTC timestamp uses an 8khz clock.
         // todo: verify
         let delta = (ts2 - ts1).0 as usize;
-
+        if delta as DiscordRtcTimestampInner > DiscordRtcTimestampInner::MAX / 2 {
+            // if the delta is more than half the max value, then it's
+            // probably the case that ts1 > ts2, which means we received
+            // a packet which is before our original timestamp.  In this
+            // case, just panic for now, as I'm not sure if songbird
+            // will ever send us packets out of order.
+            // todo: handle this gracefully?
+            panic!("received packet with timestamp before start of buffer")
+        }
         // we want the number of 16khz samples, so just multiply by 2.
         delta * types::WHISPER_SAMPLES_PER_SECOND / types::RTC_CLOCK_SAMPLES_PER_SECOND
     }
@@ -97,6 +123,31 @@ impl AudioBuffer {
                     .sum::<types::WhisperAudioSample>()
                     / types::DISCORD_AUDIO_MAX_VALUE_TWO_SAMPLES,
             );
+        }
+    }
+
+    /////////////////////////////////////////////////
+    // removing audio from the buffer
+
+    fn handle_transcription_response(&mut self, response: TranscriptionResponse) {
+        let start_timestamp = response.0.start_timestamp;
+        let segments = response.0.segments;
+        let audio_duration = response.0.audio_duration;
+
+        // todo: finish more
+    }
+
+    /// Removes the given amount of audio from the buffer,
+    /// starting with the oldest audio.  When done, will pivot
+    /// the remaining audio to the start of the buffer.
+    fn remove_audio_duration(&mut self, duration: Duration) {
+        let samples_to_remove =
+            (duration.as_millis() as usize) * types::WHISPER_SAMPLES_PER_SECOND / 1000;
+        if samples_to_remove > self.buffer.len() {
+            self.buffer.clear();
+        } else {
+            self.buffer.drain(0..samples_to_remove);
+            self.buffer.make_contiguous();
         }
     }
 }
@@ -148,7 +199,7 @@ impl<'a> AudioBufferManager {
             shutdown_token,
         };
         // pre-allocate some buffers
-        for _ in 0..10 {
+        for _ in 0..types::EXPECTED_AUDIO_PARTICIPANTS {
             audio_buffer_manager
                 .reserve_buffers
                 .push_back(AudioBuffer::new());
@@ -168,7 +219,7 @@ impl<'a> AudioBufferManager {
                 .reserve_buffers
                 .pop_front()
                 .unwrap_or_else(AudioBuffer::new);
-            buffer.assign(user_id);
+            buffer.assign_to_user(user_id);
             e.insert(buffer);
         }
         let buffer = self.active_buffers.get_mut(&user_id).unwrap();

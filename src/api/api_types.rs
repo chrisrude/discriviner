@@ -5,6 +5,8 @@ use serde_with::serde_as;
 
 use songbird::events::context_data;
 
+use crate::model::types::{WhisperToken, WhisperTokenProbabilityPercentage};
+
 pub type UserId = crate::model::types::UserId;
 
 // all this is because the songbird types don't implement Serialize
@@ -30,7 +32,7 @@ pub struct TranscribedMessage {
 
     /// One or more text segments extracted
     /// from the audio.
-    pub text_segments: Vec<TextSegment>,
+    pub segments: Vec<TextSegment>,
 
     /// conversion metric: total time of source
     /// audio which lead to this message
@@ -42,9 +44,14 @@ pub struct TranscribedMessage {
 }
 
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, Serialize, Deserialize)]
-pub struct TextSegment {
-    pub text: String,
+pub struct TokenWithProbability {
+    pub probability: WhisperTokenProbabilityPercentage,
+    pub token_id: WhisperToken,
+    pub token_text: String,
+}
 
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, Serialize, Deserialize)]
+pub struct TextSegment {
     /// When the audio for this segment started.
     /// Time is relative to when the Message was received.
     pub start_offset_ms: u32,
@@ -52,6 +59,8 @@ pub struct TextSegment {
     /// When the audio for this segment ended.
     /// Time is relative to when the Message was received.
     pub end_offset_ms: u32,
+
+    pub tokens_with_probability: Vec<TokenWithProbability>,
 }
 
 #[serde_as]
@@ -209,5 +218,17 @@ impl From<&context_data::DisconnectData<'_>> for DisconnectData {
             guild_id: value.guild_id.0,
             session_id: value.session_id.to_string(),
         }
+    }
+}
+
+impl TextSegment {
+    pub fn text(&self) -> String {
+        // take all token_text values and concatenate them
+        // returning the string
+        let mut text = String::new();
+        for token in &self.tokens_with_probability {
+            text.push_str(token.token_text.as_str());
+        }
+        text
     }
 }

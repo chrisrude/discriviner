@@ -32,6 +32,11 @@ pub const WHISPER_AUDIO_BUFFER_SIZE: usize = WHISPER_SAMPLES_PER_SECOND * AUDIO_
 /// If an audio clip is less than this length, we'll ignore it.
 pub const MIN_AUDIO_THRESHOLD_MS: u32 = 500;
 
+/// Number of audio buffers to allocate.  This should equal
+/// the number of speaking participants we expect to have
+/// in a room at a time.
+pub const EXPECTED_AUDIO_PARTICIPANTS: usize = 12;
+
 /// keep this many tokens from previous transcriptions, and
 /// use them to seed the next transcription.  This is per-user.
 pub const TOKENS_TO_KEEP: usize = 1024;
@@ -42,11 +47,17 @@ pub const DISCORD_AUDIO_MAX_VALUE_TWO_SAMPLES: WhisperAudioSample =
     DISCORD_AUDIO_MAX_VALUE * DISCORD_AUDIO_CHANNELS as WhisperAudioSample;
 
 pub type DiscordAudioSample = i16;
-pub type DiscordRtcTimestamp = Wrapping<u32>;
+pub type DiscordRtcTimestampInner = u32;
+pub type DiscordRtcTimestamp = Wrapping<DiscordRtcTimestampInner>;
 pub type Ssrc = u32;
 pub type UserId = u64;
 pub type WhisperAudioSample = f32;
 pub type WhisperToken = i32;
+
+// this is a percentage, so it's between 0 and 100
+// use this instead of a float to allow our API types to
+// implement Eq, and thus be used as keys in a HashMap
+pub type WhisperTokenProbabilityPercentage = u32;
 
 pub const DISCORD_AUDIO_MAX_VALUE: WhisperAudioSample =
     DiscordAudioSample::MAX as WhisperAudioSample;

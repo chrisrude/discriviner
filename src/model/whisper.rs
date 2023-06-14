@@ -4,11 +4,13 @@ use tokio::task::JoinHandle;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext};
 
 use crate::{
-    api::api_types,
+    api::api_types::{self, TokenWithProbability},
     events::audio::{TranscriptionRequest, TranscriptionResponse},
 };
 
-use super::types::{self, WhisperAudioSample, WHISPER_SAMPLES_PER_MILLISECOND};
+use super::types::{
+    self, WhisperAudioSample, WhisperTokenProbabilityPercentage, WHISPER_SAMPLES_PER_MILLISECOND,
+};
 
 pub(crate) struct Whisper {
     rx_transcription_requests: tokio::sync::mpsc::UnboundedReceiver<TranscriptionRequest>,
@@ -77,18 +79,15 @@ impl Whisper {
             Self::audio_to_text(&whisper_context_clone, audio_data, previous_tokens)
         });
 
-        let (text_segments, result_tokens, audio_duration) = conversion_task.await.unwrap();
+        let (segments, audio_duration) = conversion_task.await.unwrap();
 
-        let response = TranscriptionResponse {
-            tokens: result_tokens,
-            message: api_types::TranscribedMessage {
-                start_timestamp,
-                user_id,
-                text_segments,
-                audio_duration,
-                processing_time: processing_start.elapsed(),
-            },
-        };
+        let response = TranscriptionResponse(api_types::TranscribedMessage {
+            start_timestamp,
+            user_id,
+            segments,
+            audio_duration,
+            processing_time: processing_start.elapsed(),
+        });
 
         response_queue.send(response).unwrap();
     }
@@ -101,11 +100,7 @@ impl Whisper {
         whisper_context: &WhisperContext,
         audio_data_bytes: bytes::Bytes,
         previous_tokens: Vec<types::WhisperToken>,
-    ) -> (
-        Vec<api_types::TextSegment>,
-        Vec<types::WhisperToken>,
-        Duration,
-    ) {
+    ) -> (Vec<api_types::TextSegment>, Duration) {
         let mut state = whisper_context.create_state().unwrap();
 
         let audio_len_bytes = audio_data_bytes.len();
@@ -125,19 +120,31 @@ impl Whisper {
             .unwrap();
 
         let num_segments = state.full_n_segments().unwrap();
-        let mut result_segments =
-            Vec::<api_types::TextSegment>::with_capacity(num_segments as usize);
-        let mut result_tokens = Vec::<types::WhisperToken>::new();
+        let mut segments = Vec::<api_types::TextSegment>::with_capacity(num_segments as usize);
         for i in 0..num_segments {
-            result_segments.push(api_types::TextSegment {
-                text: state.full_get_segment_text(i).unwrap().to_string(),
-                start_offset_ms: state.full_get_segment_t0(i).unwrap() as u32,
-                end_offset_ms: state.full_get_segment_t1(i).unwrap() as u32,
+            let num_tokens = state.full_n_tokens(i).unwrap();
+            let mut tokens_with_probability =
+                Vec::<TokenWithProbability>::with_capacity(num_tokens as usize);
+            for j in 0..num_tokens {
+                let token_text = state.full_get_token_text(i, j).unwrap();
+                let token_id = state.full_get_token_id(i, j).unwrap();
+                let probability = (state.full_get_token_prob(i, j).unwrap() * 100.0)
+                    as WhisperTokenProbabilityPercentage;
+                tokens_with_probability.push(TokenWithProbability {
+                    probability,
+                    token_id,
+                    token_text: token_text.to_string(),
+                });
+            }
+            let start_offset_ms = state.full_get_segment_t0(i).unwrap() as u32;
+            let end_offset_ms = state.full_get_segment_t1(i).unwrap() as u32;
+            segments.push(api_types::TextSegment {
+                start_offset_ms,
+                end_offset_ms,
+                tokens_with_probability,
             });
-
-            result_tokens.push(state.full_n_tokens(i).unwrap())
         }
-        (result_segments, result_tokens, audio_duration)
+        (segments, audio_duration)
     }
 
     fn make_params(previous_tokens: &Vec<types::WhisperToken>) -> FullParams<'_, '_> {
