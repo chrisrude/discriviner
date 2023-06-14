@@ -10,11 +10,14 @@ fn on_text(message: api_types::TranscribedMessage, log_performance: bool) {
         return;
     }
     if log_performance {
-        println!("Processing time: +{}ms", message.processing_time_ms);
-        println!("Audio duration: {}ms", message.audio_duration_ms);
+        println!(
+            "Processing time: +{}ms",
+            message.processing_time.as_millis()
+        );
+        println!("Audio duration: {}ms", message.audio_duration.as_millis());
         println!(
             "total time / Audio duration: {}",
-            message.processing_time_ms as f32 / message.audio_duration_ms as f32
+            message.processing_time.as_millis() as f32 / message.audio_duration.as_millis() as f32
         );
     }
 

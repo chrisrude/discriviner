@@ -59,7 +59,7 @@ pub(crate) struct AudioBufferManager {
 
     // this is used to send transcription requests to Whisper, and
     // to receive the results.
-    tx_queue_conversion_requests: sync::mpsc::UnboundedSender<ConversionRequest<'_>>,
+    tx_queue_conversion_requests: sync::mpsc::UnboundedSender<ConversionRequest>,
 
     // these are the buffers which we've assigned to a user
     // in the conversation.  We'll keep them around until the
@@ -73,7 +73,7 @@ pub(crate) struct AudioBufferManager {
     reserve_buffers: VecDeque<AudioBuffer>,
 }
 
-impl AudioBufferManager {
+impl<'a> AudioBufferManager {
     pub fn monitor(
         rx_queue_voice: sync::mpsc::UnboundedReceiver<DiscordAudioData>,
         rx_queue_silent_user_events: sync::mpsc::UnboundedReceiver<types::UserId>,

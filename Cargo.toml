@@ -15,6 +15,9 @@ crate-type = ["lib"]
 [dependencies.async-trait]
 version = "0.1.68"
 
+[dependencies.bytes]
+version = "1.4.0"
+
 [dependencies.serde]
 version = "1.0.163"
 

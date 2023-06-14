@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
@@ -21,7 +23,7 @@ pub struct TranscribedMessage {
     /// absolute time this message was received,
     /// as reported by the Discord server
     /// (NOT the local machine time)
-    pub timestamp: u64,
+    pub start_timestamp: u64,
 
     /// Discord user id of the speaker
     pub user_id: u64,
@@ -32,11 +34,11 @@ pub struct TranscribedMessage {
 
     /// conversion metric: total time of source
     /// audio which lead to this message
-    pub audio_duration_ms: u32,
+    pub audio_duration: Duration,
 
     /// total time spent converting this audio
     /// to text
-    pub processing_time_ms: u32,
+    pub processing_time: Duration,
 }
 
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, Serialize, Deserialize)]
@@ -156,17 +158,6 @@ pub enum VoiceChannelEvent {
     Reconnect(ConnectData),
     Disconnect(DisconnectData),
     SilentChannel(bool),
-}
-
-impl TranscribedMessage {
-    pub(crate) fn all_text(&self) -> String {
-        let mut result = String::new();
-        for segment in &self.text_segments {
-            result.push_str(&segment.text);
-            result.push(' ')
-        }
-        result
-    }
 }
 
 impl From<context_data::DisconnectKind> for DisconnectKind {

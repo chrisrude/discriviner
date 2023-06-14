@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, sync::Arc, time::Duration};
 
 use tokio::task::JoinHandle;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext};
@@ -8,14 +8,14 @@ use crate::{
     events::audio::{ConversionRequest, ConversionResponse},
 };
 
-use super::types;
+use super::types::{self, WhisperAudioSample, WHISPER_SAMPLES_PER_MILLISECOND};
 
-pub struct Whisper<'a> {
-    whisper_context: WhisperContext,
-    rx_queue: tokio::sync::mpsc::UnboundedReceiver<ConversionRequest<'a>>,
+pub(crate) struct Whisper {
+    whisper_context: Arc<WhisperContext>,
+    rx_queue: tokio::sync::mpsc::UnboundedReceiver<ConversionRequest>,
 }
 
-impl<'a> Whisper<'a> {
+impl Whisper {
     /// Load a model from the given path
     pub fn load_and_monitor(
         model_path: String,
@@ -30,16 +30,15 @@ impl<'a> Whisper<'a> {
         }
 
         let whisper_context =
-            WhisperContext::new(model_path.as_str()).expect("failed to load model");
+            Arc::new(WhisperContext::new(model_path.as_str()).expect("failed to load model"));
 
-        let whisper = Self {
+        let mut whisper = Self {
             rx_queue,
             whisper_context,
         };
 
-        tokio::task::spawn_blocking(move || {
-            async { whisper.convert_forever().await };
-            ()
+        tokio::task::spawn(async move {
+            whisper.convert_forever().await;
         })
     }
 
@@ -48,24 +47,27 @@ impl<'a> Whisper<'a> {
             audio_data,
             previous_tokens,
             response_queue,
-            timestamp_start,
+            start_timestamp,
             user_id,
         }) = self.rx_queue.recv().await
         {
-            let (result_segments, result_tokens) = self.audio_to_text(audio_data, previous_tokens);
+            let processing_start = std::time::Instant::now();
+            let whisper_context_clone = self.whisper_context.clone();
+            let conversion_task = tokio::task::spawn_blocking(move || {
+                Self::audio_to_text(&whisper_context_clone, audio_data, previous_tokens)
+            });
 
-            let num_segments = result_segments.len();
+            let (text_segments, result_tokens, audio_duration) = conversion_task.await.unwrap();
 
             let response = ConversionResponse {
                 tokens: result_tokens,
                 message: api_types::TranscribedMessage {
-                    timestamp: 0, // TODO: SET
-                    user_id: 0,   // TODO: SET
-                    text_segments: result_segments,
-                    audio_duration_ms: 0,  // TODO: SET
-                    processing_time_ms: 0, // TODO: SET
+                    start_timestamp,
+                    user_id,
+                    text_segments,
+                    audio_duration,
+                    processing_time: processing_start.elapsed(),
                 },
-                finalized_segment_count: num_segments - 1,
             };
 
             response_queue.send(response).unwrap();
@@ -77,15 +79,30 @@ impl<'a> Whisper<'a> {
     /// ctx came from load_model
     /// audio data should be is f32, 16KHz, mono
     fn audio_to_text(
-        &self,
-        audio_data: &[types::WhisperAudioSample],
-        previous_tokens: Option<&[types::WhisperToken]>,
-    ) -> (Vec<api_types::TextSegment>, Vec<types::WhisperToken>) {
-        let mut state = self.whisper_context.create_state().unwrap();
+        whisper_context: &WhisperContext,
+        audio_data_bytes: bytes::Bytes,
+        previous_tokens: Vec<types::WhisperToken>,
+    ) -> (
+        Vec<api_types::TextSegment>,
+        Vec<types::WhisperToken>,
+        Duration,
+    ) {
+        let mut state = whisper_context.create_state().unwrap();
+
+        let audio_len_bytes = audio_data_bytes.len();
+        let audio_len_samples = audio_len_bytes / std::mem::size_of::<WhisperAudioSample>();
+        let audio_data = unsafe {
+            std::slice::from_raw_parts(
+                audio_data_bytes.as_ptr() as *const WhisperAudioSample,
+                audio_len_samples,
+            )
+        };
+        let audio_duration =
+            Duration::from_millis((audio_len_samples / WHISPER_SAMPLES_PER_MILLISECOND) as u64);
 
         // actually convert audio to text.  Takes a while.
         state
-            .full(self.make_params(previous_tokens), &audio_data[..])
+            .full(Self::make_params(&previous_tokens), &audio_data[..])
             .unwrap();
 
         let num_segments = state.full_n_segments().unwrap();
@@ -101,10 +118,10 @@ impl<'a> Whisper<'a> {
 
             result_tokens.push(state.full_n_tokens(i).unwrap())
         }
-        (result_segments, result_tokens)
+        (result_segments, result_tokens, audio_duration)
     }
 
-    fn make_params(&self, previous_tokens: Option<&[types::WhisperToken]>) -> FullParams {
+    fn make_params<'a>(previous_tokens: &'a Vec<types::WhisperToken>) -> FullParams<'a, 'a> {
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
 
         params.set_print_special(false);
@@ -112,9 +129,7 @@ impl<'a> Whisper<'a> {
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
 
-        if let Some(tokens) = previous_tokens {
-            params.set_tokens(tokens);
-        }
+        params.set_tokens(previous_tokens.as_slice());
 
         params
     }

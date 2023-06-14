@@ -19,17 +19,16 @@ pub struct VoiceActivityData {
 }
 
 #[derive(Debug)]
-pub(crate) struct ConversionRequest<'a> {
-    pub audio_data: &'a [types::WhisperAudioSample],
-    pub previous_tokens: Option<&'a [types::WhisperToken]>,
+pub(crate) struct ConversionRequest {
+    pub audio_data: bytes::Bytes,
+    pub previous_tokens: Vec<types::WhisperToken>,
     pub response_queue: tokio::sync::oneshot::Sender<ConversionResponse>,
-    pub timestamp_start: DiscordRtcTimestamp,
+    pub start_timestamp: u64,
     pub user_id: UserId,
 }
 
 #[derive(Debug)]
 pub(crate) struct ConversionResponse {
-    pub finalized_segment_count: usize,
     pub message: crate::api::api_types::TranscribedMessage,
     pub tokens: Vec<types::WhisperToken>,
 }
