@@ -7,7 +7,6 @@ use tokio::{sync, task};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    api::api_types::TranscribedMessage,
     events::audio::{DiscordAudioData, TranscriptionRequest, TranscriptionResponse},
     model::types::WHISPER_SAMPLES_PER_MILLISECOND,
 };
@@ -130,9 +129,9 @@ impl AudioBuffer {
     // removing audio from the buffer
 
     fn handle_transcription_response(&mut self, response: TranscriptionResponse) {
-        let start_timestamp = response.0.start_timestamp;
-        let segments = response.0.segments;
-        let audio_duration = response.0.audio_duration;
+        let _start_timestamp = response.0.start_timestamp;
+        let _segments = response.0.segments;
+        let _audio_duration = response.0.audio_duration;
 
         // todo: finish more
     }
