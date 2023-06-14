@@ -46,15 +46,17 @@ impl Whisper {
     }
 
     async fn convert_forever(&mut self) {
-        // select on both the shutdown token and the transcription requests
-        tokio::select! {
-            _ = self.shutdown_token.cancelled() => {
-                // we're done
-                return;
-            }
-            Some(transcription_request) = self.rx_transcription_requests.recv() => {
-                self.process_transcription_request(transcription_request).await;
+        loop {
+            // select on both the shutdown token and the transcription requests
+            tokio::select! {
+                _ = self.shutdown_token.cancelled() => {
+                    // we're done;
+                    return;
+                }
+                Some(transcription_request) = self.rx_transcription_requests.recv() => {
+                    self.process_transcription_request(transcription_request).await;
 
+                }
             }
         }
     }

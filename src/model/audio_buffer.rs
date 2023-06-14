@@ -64,7 +64,7 @@ impl AudioBuffer {
             self.buffer.push_back(0.0);
         }
 
-        self.resample_audio_from_discord_to_whisper(&discord_audio);
+        self.resample_audio_from_discord_to_whisper(discord_audio);
     }
 
     fn discord_audio_len_to_whisper_audio_len(len: usize) -> usize {
@@ -163,13 +163,13 @@ impl<'a> AudioBufferManager {
         user_id: types::UserId,
         mut yield_fn: impl FnMut(&mut AudioBuffer),
     ) {
-        if !self.active_buffers.contains_key(&user_id) {
+        if let std::collections::hash_map::Entry::Vacant(e) = self.active_buffers.entry(user_id) {
             let mut buffer = self
                 .reserve_buffers
                 .pop_front()
                 .unwrap_or_else(AudioBuffer::new);
             buffer.assign(user_id);
-            self.active_buffers.insert(user_id, buffer);
+            e.insert(buffer);
         }
         let buffer = self.active_buffers.get_mut(&user_id).unwrap();
         (yield_fn)(buffer);
@@ -193,7 +193,7 @@ impl<'a> AudioBufferManager {
                     });
                 }
                 // todo: also, every 5 seconds timeout
-                Some(user_id) = self.rx_silent_user_events.recv() => {
+                Some(_user_id) = self.rx_silent_user_events.recv() => {
                     // todo: self.handle_silent_user_event(user_id).await;
                 }
             }
