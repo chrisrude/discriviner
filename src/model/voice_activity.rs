@@ -12,10 +12,10 @@ use tokio::time::Instant;
 pub(crate) struct VoiceActivity {
     last_time_by_user: collections::HashMap<UserId, (bool, time::Instant)>,
     silence_list: VecDeque<(Instant, UserId, Instant)>,
-    rx_queue: sync::mpsc::UnboundedReceiver<VoiceActivityData>,
+    rx_voice_activity: sync::mpsc::UnboundedReceiver<VoiceActivityData>,
     speaking_users: collections::HashSet<UserId>,
-    tx_queue_silent_channel: sync::mpsc::UnboundedSender<VoiceChannelEvent>,
-    tx_queue_silent_user: sync::mpsc::UnboundedSender<UserId>,
+    tx_api_events: sync::mpsc::UnboundedSender<VoiceChannelEvent>,
+    tx_silent_user_events: sync::mpsc::UnboundedSender<UserId>,
     user_silence_timeout: Duration,
 }
 
@@ -31,18 +31,18 @@ impl VoiceActivity {
     const ONE_YEAR: Duration = Duration::from_secs(60 * 60 * 24 * 365);
 
     pub(crate) fn monitor(
-        rx_queue: sync::mpsc::UnboundedReceiver<VoiceActivityData>,
+        rx_voice_activity: sync::mpsc::UnboundedReceiver<VoiceActivityData>,
         user_silence_timeout: Duration,
-        tx_queue_silent_channel: sync::mpsc::UnboundedSender<VoiceChannelEvent>,
-        tx_queue_silent_user: sync::mpsc::UnboundedSender<UserId>,
+        tx_api_events: sync::mpsc::UnboundedSender<VoiceChannelEvent>,
+        tx_silent_user_events: sync::mpsc::UnboundedSender<UserId>,
     ) -> task::JoinHandle<()> {
         let mut voice_activity = Self {
             last_time_by_user: collections::HashMap::new(),
             silence_list: VecDeque::new(),
             speaking_users: collections::HashSet::new(),
-            rx_queue,
-            tx_queue_silent_channel,
-            tx_queue_silent_user,
+            rx_voice_activity,
+            tx_api_events,
+            tx_silent_user_events,
             user_silence_timeout,
         };
         task::spawn(async move {
@@ -57,7 +57,7 @@ impl VoiceActivity {
 
             // next future will always be at the end... only need to wait for a single one ever
             tokio::select! {
-                maybe_activity = self.rx_queue.recv() => {
+                maybe_activity = self.rx_voice_activity.recv() => {
                     if maybe_activity.is_none() {
                         // the sender has been dropped, so we are done
                         return;
@@ -80,7 +80,7 @@ impl VoiceActivity {
                         let was_empty = self.speaking_users.is_empty();
                         self.speaking_users.insert(activity.user_id);
                         if was_empty {
-                            self.tx_queue_silent_channel.send(
+                            self.tx_api_events.send(
                                 VoiceChannelEvent::SilentChannel(false)
                             ).unwrap();
                         }
@@ -88,7 +88,7 @@ impl VoiceActivity {
                         let was_someone_speaking = !self.speaking_users.is_empty();
                         self.speaking_users.remove(&activity.user_id);
                         if was_someone_speaking && self.speaking_users.is_empty() {
-                            self.tx_queue_silent_channel.send(
+                            self.tx_api_events.send(
                                 VoiceChannelEvent::SilentChannel(true)
                             ).unwrap();
                         }
@@ -109,7 +109,7 @@ impl VoiceActivity {
                         if let Some((speaking, last_time_actual)) = self.last_time_by_user.get(&user_id) {
                             if !*speaking && last_time == *last_time_actual {
                                 // user has been silent the whole time
-                                self.tx_queue_silent_user.send(user_id).unwrap();
+                                self.tx_silent_user_events.send(user_id).unwrap();
                             }
                         }
                     }

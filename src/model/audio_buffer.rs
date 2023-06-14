@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 
 use tokio::{sync, task};
 
-use crate::events::audio::{ConversionRequest, DiscordAudioData};
+use crate::events::audio::{DiscordAudioData, TranscriptionRequest};
 
 use super::types::{self, DiscordRtcTimestamp, UserId, WhisperAudioSample, WhisperToken};
 
@@ -48,19 +48,6 @@ impl AudioBuffer {
 /// Handles a set of audio buffers, one for each user who is
 /// talking in the conversation.
 pub(crate) struct AudioBufferManager {
-    // we'll have a single task which monitors this queue for new
-    // audio data and then pushes it into the appropriate buffer.
-    rx_queue_voice: sync::mpsc::UnboundedReceiver<DiscordAudioData>,
-
-    // this queue is used to notify the audio buffer manager that
-    // a user has stopped talking.  We'll use this to know when
-    // to trigger our final transcription.
-    rx_queue_silent_user_events: sync::mpsc::UnboundedReceiver<types::UserId>,
-
-    // this is used to send transcription requests to Whisper, and
-    // to receive the results.
-    tx_queue_conversion_requests: sync::mpsc::UnboundedSender<ConversionRequest>,
-
     // these are the buffers which we've assigned to a user
     // in the conversation.  We'll keep them around until the
     // user leaves, as we may need to use them again.  When
@@ -71,18 +58,31 @@ pub(crate) struct AudioBufferManager {
     // not currently in use.  We'll keep them around so that we
     // can quickly assign them to a user when they start talking.
     reserve_buffers: VecDeque<AudioBuffer>,
+
+    // we'll have a single task which monitors this queue for new
+    // audio data and then pushes it into the appropriate buffer.
+    rx_audio_data: sync::mpsc::UnboundedReceiver<DiscordAudioData>,
+
+    // this queue is used to notify the audio buffer manager that
+    // a user has stopped talking.  We'll use this to know when
+    // to trigger our final transcription.
+    rx_silent_user_events: sync::mpsc::UnboundedReceiver<types::UserId>,
+
+    // this is used to send transcription requests to Whisper, and
+    // to receive the results.
+    tx_transcription_requests: sync::mpsc::UnboundedSender<TranscriptionRequest>,
 }
 
 impl<'a> AudioBufferManager {
     pub fn monitor(
-        rx_queue_voice: sync::mpsc::UnboundedReceiver<DiscordAudioData>,
-        rx_queue_silent_user_events: sync::mpsc::UnboundedReceiver<types::UserId>,
-        tx_queue_conversion_requests: sync::mpsc::UnboundedSender<ConversionRequest>,
+        rx_audio_data: sync::mpsc::UnboundedReceiver<DiscordAudioData>,
+        rx_silent_user_events: sync::mpsc::UnboundedReceiver<types::UserId>,
+        tx_transcription_requests: sync::mpsc::UnboundedSender<TranscriptionRequest>,
     ) -> task::JoinHandle<()> {
         let mut audio_buffer_manager = AudioBufferManager {
-            rx_queue_voice,
-            rx_queue_silent_user_events,
-            tx_queue_conversion_requests,
+            rx_audio_data,
+            rx_silent_user_events,
+            tx_transcription_requests,
             active_buffers: HashMap::new(),
             reserve_buffers: VecDeque::new(),
         };
@@ -100,10 +100,10 @@ impl<'a> AudioBufferManager {
     async fn loop_forever(&mut self) {
         loop {
             tokio::select! {
-                Some(_voice_data) = self.rx_queue_voice.recv() => {
+                Some(_voice_data) = self.rx_audio_data.recv() => {
                     // todo: self.handle_voice_data(voice_data).await;
                 }
-                Some(_user_id) = self.rx_queue_silent_user_events.recv() => {
+                Some(_user_id) = self.rx_silent_user_events.recv() => {
                     // todo: self.handle_silent_user_event(user_id).await;
                 }
             }

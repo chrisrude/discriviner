@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::api::api_types;
-use crate::events::audio::{ConversionRequest, DiscordAudioData, VoiceActivityData};
+use crate::events::audio::{DiscordAudioData, TranscriptionRequest, VoiceActivityData};
 use crate::model::{types, voice_activity, whisper};
 use crate::packet_handler;
 
@@ -15,7 +15,6 @@ pub struct Discrivener {
     api_task: JoinHandle<()>,
     audio_buffer_manager_task: JoinHandle<()>,
     driver: songbird::Driver,
-    handler: Arc<packet_handler::PacketHandler>,
     whisper_task: JoinHandle<()>,
     voice_activity_task: JoinHandle<()>,
 }
@@ -28,56 +27,50 @@ impl Discrivener {
         let mut config = songbird::Config::default();
         config.decode_mode = songbird::driver::DecodeMode::Decode; // convert incoming audio from Opus to PCM
 
-        let (audio_events_sender, audio_events_receiver) =
+        // todo: broadcast shutdown event
+
+        let (tx_audio_data, rx_audio_data) =
             tokio::sync::mpsc::unbounded_channel::<DiscordAudioData>();
-        let (user_api_events_sender, user_api_events_receiver) =
+        let (tx_api_events, rx_api_events) =
             tokio::sync::mpsc::unbounded_channel::<api_types::VoiceChannelEvent>();
-        let (voice_activity_events_sender, voice_activity_events_receiver) =
+        let (tx_silent_user_events, rx_silent_user_events) =
+            tokio::sync::mpsc::unbounded_channel::<u64>();
+        let (tx_transcription_requests, rx_transcription_requests) =
+            tokio::sync::mpsc::unbounded_channel::<TranscriptionRequest>();
+        let (tx_voice_activity, rx_voice_activity) =
             tokio::sync::mpsc::unbounded_channel::<VoiceActivityData>();
 
-        let (conversion_requests_sender, conversion_requests_receiver) =
-            tokio::sync::mpsc::unbounded_channel::<ConversionRequest>();
-
-        let (silent_user_events_sender, silent_user_events_receiver) =
-            tokio::sync::mpsc::unbounded_channel::<u64>();
-
         let voice_activity_task = voice_activity::VoiceActivity::monitor(
-            voice_activity_events_receiver,
+            rx_voice_activity,
             Duration::from_millis(types::USER_SILENCE_TIMEOUT_MS),
-            user_api_events_sender.clone(),
-            silent_user_events_sender,
+            tx_api_events.clone(),
+            tx_silent_user_events,
         );
 
         // the audio buffer manager gets the voice data
         let audio_buffer_manager_task = crate::model::audio_buffer::AudioBufferManager::monitor(
-            audio_events_receiver,
-            silent_user_events_receiver,
-            conversion_requests_sender,
+            rx_audio_data,
+            rx_silent_user_events,
+            tx_transcription_requests,
         );
 
         let mut driver = songbird::Driver::new(config);
-
-        let handler = packet_handler::PacketHandler::new(
+        packet_handler::PacketHandler::register(
             &mut driver,
-            audio_events_sender,
-            user_api_events_sender,
-            voice_activity_events_sender,
-        )
-        .await;
+            tx_api_events,
+            tx_audio_data,
+            tx_voice_activity,
+        );
 
         let whisper_task =
-            whisper::Whisper::load_and_monitor(model_path, conversion_requests_receiver);
+            whisper::Whisper::load_and_monitor(model_path, rx_transcription_requests);
 
-        let api_task = tokio::spawn(Self::start_api_task(
-            user_api_events_receiver,
-            event_callback,
-        ));
+        let api_task = tokio::spawn(Self::start_api_task(rx_api_events, event_callback));
 
         Self {
             api_task,
             audio_buffer_manager_task,
             driver,
-            handler,
             voice_activity_task,
             whisper_task,
         }
@@ -110,12 +103,10 @@ impl Discrivener {
     }
 
     async fn start_api_task(
-        mut user_api_events_receiver: tokio::sync::mpsc::UnboundedReceiver<
-            api_types::VoiceChannelEvent,
-        >,
+        mut rx_api_events: tokio::sync::mpsc::UnboundedReceiver<api_types::VoiceChannelEvent>,
         event_callback: std::sync::Arc<dyn Fn(api_types::VoiceChannelEvent) + Send + Sync>,
     ) {
-        while let Some(event) = user_api_events_receiver.recv().await {
+        while let Some(event) = rx_api_events.recv().await {
             event_callback(event);
         }
     }

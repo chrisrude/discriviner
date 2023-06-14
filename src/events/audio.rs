@@ -19,16 +19,16 @@ pub struct VoiceActivityData {
 }
 
 #[derive(Debug)]
-pub(crate) struct ConversionRequest {
+pub(crate) struct TranscriptionRequest {
     pub audio_data: bytes::Bytes,
     pub previous_tokens: Vec<types::WhisperToken>,
-    pub response_queue: tokio::sync::oneshot::Sender<ConversionResponse>,
+    pub response_queue: tokio::sync::oneshot::Sender<TranscriptionResponse>,
     pub start_timestamp: u64,
     pub user_id: UserId,
 }
 
 #[derive(Debug)]
-pub(crate) struct ConversionResponse {
+pub(crate) struct TranscriptionResponse {
     pub message: crate::api::api_types::TranscribedMessage,
     pub tokens: Vec<types::WhisperToken>,
 }

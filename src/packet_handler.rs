@@ -21,26 +21,25 @@ use crate::model::types::DiscordRtcTimestamp;
 
 pub(crate) struct PacketHandler {
     ssrc_to_user_id: RwLock<std::collections::HashMap<types::Ssrc, types::UserId>>,
-    audio_events_sender: UnboundedSender<DiscordAudioData>,
-    user_api_events_sender: UnboundedSender<api_types::VoiceChannelEvent>,
-    voice_activity_events_sender: UnboundedSender<VoiceActivityData>,
+    tx_api_events: UnboundedSender<api_types::VoiceChannelEvent>,
+    tx_audio_data: UnboundedSender<DiscordAudioData>,
+    tx_voice_activity: UnboundedSender<VoiceActivityData>,
 }
 
 impl PacketHandler {
-    pub(crate) async fn new(
+    pub(crate) fn register(
         driver: &mut songbird::Driver,
-        audio_events_sender: UnboundedSender<DiscordAudioData>,
-        user_api_events_sender: UnboundedSender<api_types::VoiceChannelEvent>,
-        voice_activity_events_sender: UnboundedSender<VoiceActivityData>,
-    ) -> Arc<Self> {
-        let handler = Arc::new(Self {
+        tx_api_events: UnboundedSender<api_types::VoiceChannelEvent>,
+        tx_audio_data: UnboundedSender<DiscordAudioData>,
+        tx_voice_activity: UnboundedSender<VoiceActivityData>,
+    ) {
+        let handler = Self {
             ssrc_to_user_id: RwLock::new(std::collections::HashMap::new()),
-            audio_events_sender,
-            user_api_events_sender,
-            voice_activity_events_sender,
-        });
-        register_events(&handler, driver).await;
-        handler
+            tx_api_events,
+            tx_audio_data,
+            tx_voice_activity,
+        };
+        register_events(handler, driver);
     }
 
     fn on_user_join(&self, ssrc: types::Ssrc, user_id: types::UserId) {
@@ -48,7 +47,7 @@ impl PacketHandler {
             // map the SSRC to the user ID
             self.ssrc_to_user_id.write().unwrap().insert(ssrc, user_id);
         }
-        self.user_api_events_sender
+        self.tx_api_events
             .send(api_types::VoiceChannelEvent::UserJoin(
                 api_types::UserJoinData {
                     user_id,
@@ -61,7 +60,7 @@ impl PacketHandler {
     fn on_start_talking(&self, ssrc: types::Ssrc) {
         let user_id = self.user_id_from_ssrc(ssrc);
         if let Some(user_id) = user_id {
-            self.voice_activity_events_sender
+            self.tx_voice_activity
                 .send(VoiceActivityData {
                     user_id,
                     speaking: true,
@@ -77,7 +76,7 @@ impl PacketHandler {
         ssrc: types::Ssrc,
     ) {
         if let Some(user_id) = self.user_id_from_ssrc(ssrc) {
-            self.audio_events_sender
+            self.tx_audio_data
                 .send(DiscordAudioData {
                     user_id,
                     audio: audio.to_vec(),
@@ -91,7 +90,7 @@ impl PacketHandler {
     /// the songbird driver has noticed 5 continuous packets (100ms) of silence.
     fn on_stop_talking(&self, ssrc: types::Ssrc) {
         if let Some(user_id) = self.user_id_from_ssrc(ssrc) {
-            self.voice_activity_events_sender
+            self.tx_voice_activity
                 .send(VoiceActivityData {
                     user_id,
                     speaking: false,
@@ -109,7 +108,7 @@ impl PacketHandler {
         // Also, there's a chance that we might get other events
         // for this user after they leave, so we don't want to
         // remove them from the map just yet.
-        self.user_api_events_sender
+        self.tx_api_events
             .send(api_types::VoiceChannelEvent::UserJoin(
                 api_types::UserJoinData {
                     user_id,
@@ -143,7 +142,8 @@ where
     }
 }
 
-pub(crate) async fn register_events(handler: &Arc<PacketHandler>, driver: &mut songbird::Driver) {
+pub(crate) async fn register_events(raw_handler: PacketHandler, driver: &mut songbird::Driver) {
+    let handler = Arc::new(raw_handler);
     // event handlers for the songbird driver
     driver.add_global_event(
         songbird::CoreEvent::SpeakingStateUpdate.into(),
@@ -231,7 +231,7 @@ pub(crate) async fn register_events(handler: &Arc<PacketHandler>, driver: &mut s
             handler: |ctx, my_handler| {
                 if let EventContext::DriverConnect(connect_data) = ctx {
                     my_handler
-                        .user_api_events_sender
+                        .tx_api_events
                         .send(api_types::VoiceChannelEvent::Connect(
                             api_types::ConnectData::from(connect_data),
                         ))
@@ -247,7 +247,7 @@ pub(crate) async fn register_events(handler: &Arc<PacketHandler>, driver: &mut s
             handler: |ctx, my_handler| {
                 if let EventContext::DriverDisconnect(disconnect_data) = ctx {
                     my_handler
-                        .user_api_events_sender
+                        .tx_api_events
                         .send(api_types::VoiceChannelEvent::Disconnect(
                             api_types::DisconnectData::from(disconnect_data),
                         ))
@@ -263,7 +263,7 @@ pub(crate) async fn register_events(handler: &Arc<PacketHandler>, driver: &mut s
             handler: |ctx, my_handler| {
                 if let EventContext::DriverReconnect(connect_data) = ctx {
                     my_handler
-                        .user_api_events_sender
+                        .tx_api_events
                         .send(api_types::VoiceChannelEvent::Reconnect(
                             api_types::ConnectData::from(connect_data),
                         ))

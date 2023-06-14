@@ -5,21 +5,21 @@ use whisper_rs::{FullParams, SamplingStrategy, WhisperContext};
 
 use crate::{
     api::api_types,
-    events::audio::{ConversionRequest, ConversionResponse},
+    events::audio::{TranscriptionRequest, TranscriptionResponse},
 };
 
 use super::types::{self, WhisperAudioSample, WHISPER_SAMPLES_PER_MILLISECOND};
 
 pub(crate) struct Whisper {
     whisper_context: Arc<WhisperContext>,
-    rx_queue: tokio::sync::mpsc::UnboundedReceiver<ConversionRequest>,
+    rx_transcription_requests: tokio::sync::mpsc::UnboundedReceiver<TranscriptionRequest>,
 }
 
 impl Whisper {
     /// Load a model from the given path
     pub fn load_and_monitor(
         model_path: String,
-        rx_queue: tokio::sync::mpsc::UnboundedReceiver<ConversionRequest>,
+        rx_transcription_requests: tokio::sync::mpsc::UnboundedReceiver<TranscriptionRequest>,
     ) -> JoinHandle<()> {
         let path = Path::new(model_path.as_str());
         if !path.exists() {
@@ -33,7 +33,7 @@ impl Whisper {
             Arc::new(WhisperContext::new(model_path.as_str()).expect("failed to load model"));
 
         let mut whisper = Self {
-            rx_queue,
+            rx_transcription_requests,
             whisper_context,
         };
 
@@ -43,13 +43,13 @@ impl Whisper {
     }
 
     async fn convert_forever(&mut self) {
-        while let Some(ConversionRequest {
+        while let Some(TranscriptionRequest {
             audio_data,
             previous_tokens,
             response_queue,
             start_timestamp,
             user_id,
-        }) = self.rx_queue.recv().await
+        }) = self.rx_transcription_requests.recv().await
         {
             let processing_start = std::time::Instant::now();
             let whisper_context_clone = self.whisper_context.clone();
@@ -59,7 +59,7 @@ impl Whisper {
 
             let (text_segments, result_tokens, audio_duration) = conversion_task.await.unwrap();
 
-            let response = ConversionResponse {
+            let response = TranscriptionResponse {
                 tokens: result_tokens,
                 message: api_types::TranscribedMessage {
                     start_timestamp,
