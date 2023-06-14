@@ -8,11 +8,13 @@ use tokio::task;
 use tokio::time;
 use tokio::time::Duration;
 use tokio::time::Instant;
+use tokio_util::sync::CancellationToken;
 
 pub(crate) struct VoiceActivity {
     last_time_by_user: collections::HashMap<UserId, (bool, time::Instant)>,
-    silence_list: VecDeque<(Instant, UserId, Instant)>,
     rx_voice_activity: sync::mpsc::UnboundedReceiver<VoiceActivityData>,
+    shutdown_token: CancellationToken,
+    silence_list: VecDeque<(Instant, UserId, Instant)>,
     speaking_users: collections::HashSet<UserId>,
     tx_api_events: sync::mpsc::UnboundedSender<VoiceChannelEvent>,
     tx_silent_user_events: sync::mpsc::UnboundedSender<UserId>,
@@ -32,15 +34,17 @@ impl VoiceActivity {
 
     pub(crate) fn monitor(
         rx_voice_activity: sync::mpsc::UnboundedReceiver<VoiceActivityData>,
-        user_silence_timeout: Duration,
+        shutdown_token: CancellationToken,
         tx_api_events: sync::mpsc::UnboundedSender<VoiceChannelEvent>,
         tx_silent_user_events: sync::mpsc::UnboundedSender<UserId>,
+        user_silence_timeout: Duration,
     ) -> task::JoinHandle<()> {
         let mut voice_activity = Self {
             last_time_by_user: collections::HashMap::new(),
+            rx_voice_activity,
+            shutdown_token,
             silence_list: VecDeque::new(),
             speaking_users: collections::HashSet::new(),
-            rx_voice_activity,
             tx_api_events,
             tx_silent_user_events,
             user_silence_timeout,
@@ -57,6 +61,10 @@ impl VoiceActivity {
 
             // next future will always be at the end... only need to wait for a single one ever
             tokio::select! {
+                _ = self.shutdown_token.cancelled() => {
+                    // time to be done
+                    return;
+                }
                 maybe_activity = self.rx_voice_activity.recv() => {
                     if maybe_activity.is_none() {
                         // the sender has been dropped, so we are done
@@ -129,14 +137,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_voice_activity() {
+        let shutdown_token = CancellationToken::new();
         let (tx, rx) = sync::mpsc::unbounded_channel();
         let (tx_silent_channel, mut rx_silent_channel) = sync::mpsc::unbounded_channel();
         let (tx_silent_user, mut rx_silent_user) = sync::mpsc::unbounded_channel();
         let voice_activity = VoiceActivity::monitor(
             rx,
-            Duration::from_millis(1),
+            shutdown_token,
             tx_silent_channel,
             tx_silent_user,
+            Duration::from_millis(1),
         );
 
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
@@ -199,14 +209,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_voice_activity_with_interruption() {
+        let shutdown_token = CancellationToken::new();
         let (tx, rx) = sync::mpsc::unbounded_channel();
         let (tx_silent_channel, mut rx_silent_channel) = sync::mpsc::unbounded_channel();
         let (tx_silent_user, mut rx_silent_user) = sync::mpsc::unbounded_channel();
         let voice_activity = VoiceActivity::monitor(
             rx,
-            Duration::from_millis(10),
+            shutdown_token,
             tx_silent_channel,
             tx_silent_user,
+            Duration::from_millis(10),
         );
 
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
@@ -289,6 +301,27 @@ mod tests {
 
         // close the sender, which will cause the loop to exit
         drop(tx);
+        voice_activity.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_on_token() {
+        let shutdown_token = CancellationToken::new();
+        let (_tx, rx) = sync::mpsc::unbounded_channel();
+        let (tx_silent_channel, mut rx_silent_channel) = sync::mpsc::unbounded_channel();
+        let (tx_silent_user, mut rx_silent_user) = sync::mpsc::unbounded_channel();
+        let voice_activity = VoiceActivity::monitor(
+            rx,
+            shutdown_token.clone(),
+            tx_silent_channel,
+            tx_silent_user,
+            Duration::from_millis(10),
+        );
+
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
+        assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
+
+        shutdown_token.cancel();
         voice_activity.await.unwrap();
     }
 }

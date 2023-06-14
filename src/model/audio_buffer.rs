@@ -1,6 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 
-use tokio::{sync, task};
+use tokio::{signal, sync, task};
+use tokio_util::sync::CancellationToken;
 
 use crate::events::audio::{DiscordAudioData, TranscriptionRequest};
 
@@ -15,32 +16,87 @@ pub struct AudioBuffer {
     /// The RTC timestamp typically uses an 8khz clock.
     /// So a 20ms buffer would have a timestamp increment
     /// of 160 from the previous buffer.
-    pub head_timestamp: DiscordRtcTimestamp,
-
-    /// The timestamp of the last sample in the buffer.
-    pub last_write_timestamp: DiscordRtcTimestamp,
-
-    /// The timestamp of the most recent sample we've sent
-    /// to the transcription worker.
-    pub last_transcription_timestamp: DiscordRtcTimestamp,
-
-    /// User ID of the user that this buffer is for.
-    pub user_id: UserId,
+    pub head_timestamp: Option<DiscordRtcTimestamp>,
 
     /// The most recent tokens we've seen from this
     /// user.  Used to help inform the decoder.
     pub last_tokens: std::collections::VecDeque<WhisperToken>, // TOKENS_TO_KEEP
+
+    /// User ID of the user that this buffer is for.
+    pub user_id: Option<UserId>,
 }
 
 impl AudioBuffer {
     fn new() -> Self {
         Self {
-            user_id: 0, // TODO
             buffer: VecDeque::with_capacity(types::WHISPER_AUDIO_BUFFER_SIZE),
-            head_timestamp: std::num::Wrapping(0), // todo: sentinel value?
-            last_transcription_timestamp: std::num::Wrapping(0),
-            last_write_timestamp: std::num::Wrapping(0),
+            head_timestamp: None,
             last_tokens: VecDeque::with_capacity(types::TOKENS_TO_KEEP),
+            user_id: None,
+        }
+    }
+
+    fn assign(&mut self, user_id: UserId) {
+        self.head_timestamp = None;
+        self.last_tokens.clear();
+        self.user_id = Some(user_id);
+    }
+
+    fn add_audio(
+        &mut self,
+        timestamp: DiscordRtcTimestamp,
+        discord_audio: &Vec<types::DiscordAudioSample>,
+    ) {
+        if self.head_timestamp.is_none() {
+            self.head_timestamp = Some(timestamp);
+        }
+        let offset = Self::rtc_timestamp_delta_to_whisper_audio_delta(
+            self.head_timestamp.unwrap(),
+            timestamp,
+        );
+        let end = offset + Self::discord_audio_len_to_whisper_audio_len(discord_audio.len());
+        if end > self.buffer.len() {
+            // todo: drop audio instead of panicking?
+            panic!("buffer overflow");
+        }
+
+        while self.buffer.len() < offset {
+            self.buffer.push_back(0.0);
+        }
+
+        self.resample_audio_from_discord_to_whisper(&discord_audio);
+    }
+
+    fn discord_audio_len_to_whisper_audio_len(len: usize) -> usize {
+        // The Discord audio data is 16-bit stereo PCM at 48kHz.
+        // We want to convert this to 16-bit mono PCM at 16kHz.
+        // So we'll divide the length by 3.
+        len / types::BITRATE_CONVERSION_RATIO
+    }
+
+    fn rtc_timestamp_delta_to_whisper_audio_delta(
+        ts1: DiscordRtcTimestamp,
+        ts2: DiscordRtcTimestamp,
+    ) -> usize {
+        // The RTC timestamp uses an 8khz clock.
+        // todo: verify
+        let delta = (ts2 - ts1).0 as usize;
+
+        // we want the number of 16khz samples, so just multiply by 2.
+        delta * types::WHISPER_SAMPLES_PER_SECOND / types::RTC_CLOCK_SAMPLES_PER_SECOND
+    }
+
+    fn resample_audio_from_discord_to_whisper(&mut self, audio: &[types::DiscordAudioSample]) {
+        for samples in audio.chunks_exact(types::BITRATE_CONVERSION_RATIO) {
+            // sum the channel data, and divide by the max value possible to
+            // get a value between -1.0 and 1.0
+            self.buffer.push_back(
+                samples
+                    .iter()
+                    .map(|x| *x as types::WhisperAudioSample)
+                    .sum::<types::WhisperAudioSample>()
+                    / types::DISCORD_AUDIO_MAX_VALUE_TWO_SAMPLES,
+            );
         }
     }
 }
@@ -68,6 +124,9 @@ pub(crate) struct AudioBufferManager {
     // to trigger our final transcription.
     rx_silent_user_events: sync::mpsc::UnboundedReceiver<types::UserId>,
 
+    // this is used to signal the audio buffer manager to shut down.
+    shutdown_token: CancellationToken,
+
     // this is used to send transcription requests to Whisper, and
     // to receive the results.
     tx_transcription_requests: sync::mpsc::UnboundedSender<TranscriptionRequest>,
@@ -77,14 +136,16 @@ impl<'a> AudioBufferManager {
     pub fn monitor(
         rx_audio_data: sync::mpsc::UnboundedReceiver<DiscordAudioData>,
         rx_silent_user_events: sync::mpsc::UnboundedReceiver<types::UserId>,
+        shutdown_token: CancellationToken,
         tx_transcription_requests: sync::mpsc::UnboundedSender<TranscriptionRequest>,
     ) -> task::JoinHandle<()> {
         let mut audio_buffer_manager = AudioBufferManager {
+            active_buffers: HashMap::new(),
+            reserve_buffers: VecDeque::new(),
             rx_audio_data,
             rx_silent_user_events,
             tx_transcription_requests,
-            active_buffers: HashMap::new(),
-            reserve_buffers: VecDeque::new(),
+            shutdown_token,
         };
         // pre-allocate some buffers
         for _ in 0..10 {
@@ -97,38 +158,47 @@ impl<'a> AudioBufferManager {
         })
     }
 
+    fn with_buffer_for_user(
+        &mut self,
+        user_id: types::UserId,
+        mut yield_fn: impl FnMut(&mut AudioBuffer),
+    ) {
+        if !self.active_buffers.contains_key(&user_id) {
+            let mut buffer = self
+                .reserve_buffers
+                .pop_front()
+                .unwrap_or_else(AudioBuffer::new);
+            buffer.assign(user_id);
+            self.active_buffers.insert(user_id, buffer);
+        }
+        let buffer = self.active_buffers.get_mut(&user_id).unwrap();
+        (yield_fn)(buffer);
+    }
+
     async fn loop_forever(&mut self) {
         loop {
             tokio::select! {
-                Some(_voice_data) = self.rx_audio_data.recv() => {
-                    // todo: self.handle_voice_data(voice_data).await;
+                _ = signal::ctrl_c() => {
+                    // we are done
+                    return;
+                },
+                Some(
+                    DiscordAudioData {
+                        user_id,
+                        timestamp,
+                        discord_audio,
+                    }
+                ) = self.rx_audio_data.recv() => {
+                    self.with_buffer_for_user(user_id, |buffer| {
+                        buffer.add_audio(timestamp, &discord_audio);
+                    });
                 }
-                Some(_user_id) = self.rx_silent_user_events.recv() => {
+                // todo: also, every 5 seconds timeout
+                Some(user_id) = self.rx_silent_user_events.recv() => {
                     // todo: self.handle_silent_user_event(user_id).await;
                 }
             }
         }
-    }
-}
-
-const DISCORD_AUDIO_MAX_VALUE_TWO_SAMPLES: types::WhisperAudioSample =
-    types::DISCORD_AUDIO_MAX_VALUE * types::DISCORD_AUDIO_CHANNELS as types::WhisperAudioSample;
-
-fn resample_audio_from_discord_to_whisper(
-    audio: &[types::DiscordAudioSample; types::DISCORD_PACKET_GROUP_SIZE],
-    audio_out: &mut [types::WhisperAudioSample; types::WHISPER_PACKET_GROUP_SIZE],
-) {
-    for (i, samples) in audio
-        .chunks_exact(types::BITRATE_CONVERSION_RATIO)
-        .enumerate()
-    {
-        // sum the channel data, and divide by the max value possible to
-        // get a value between -1.0 and 1.0
-        audio_out[i] = samples
-            .iter()
-            .map(|x| *x as types::WhisperAudioSample)
-            .sum::<types::WhisperAudioSample>()
-            / DISCORD_AUDIO_MAX_VALUE_TWO_SAMPLES;
     }
 }
 

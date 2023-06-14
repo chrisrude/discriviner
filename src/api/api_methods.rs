@@ -1,4 +1,3 @@
-
 use std::time::Duration;
 
 use crate::api::api_types;
@@ -9,14 +8,16 @@ use crate::packet_handler;
 use songbird::id::{ChannelId, GuildId, UserId};
 use songbird::ConnectionInfo;
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
 pub struct Discrivener {
     // task which will fire API change events
-    api_task: JoinHandle<()>,
-    audio_buffer_manager_task: JoinHandle<()>,
+    api_task: Option<JoinHandle<()>>,
+    audio_buffer_manager_task: Option<JoinHandle<()>>,
     driver: songbird::Driver,
-    whisper_task: JoinHandle<()>,
-    voice_activity_task: JoinHandle<()>,
+    shutdown_token: CancellationToken,
+    whisper_task: Option<JoinHandle<()>>,
+    voice_activity_task: Option<JoinHandle<()>>,
 }
 
 impl Discrivener {
@@ -27,8 +28,7 @@ impl Discrivener {
         let mut config = songbird::Config::default();
         config.decode_mode = songbird::driver::DecodeMode::Decode; // convert incoming audio from Opus to PCM
 
-        // todo: broadcast shutdown event
-
+        let shutdown_token = CancellationToken::new();
         let (tx_audio_data, rx_audio_data) =
             tokio::sync::mpsc::unbounded_channel::<DiscordAudioData>();
         let (tx_api_events, rx_api_events) =
@@ -40,19 +40,22 @@ impl Discrivener {
         let (tx_voice_activity, rx_voice_activity) =
             tokio::sync::mpsc::unbounded_channel::<VoiceActivityData>();
 
-        let voice_activity_task = voice_activity::VoiceActivity::monitor(
+        let voice_activity_task = Some(voice_activity::VoiceActivity::monitor(
             rx_voice_activity,
-            Duration::from_millis(types::USER_SILENCE_TIMEOUT_MS),
+            shutdown_token.clone(),
             tx_api_events.clone(),
             tx_silent_user_events,
-        );
+            Duration::from_millis(types::USER_SILENCE_TIMEOUT_MS),
+        ));
 
         // the audio buffer manager gets the voice data
-        let audio_buffer_manager_task = crate::model::audio_buffer::AudioBufferManager::monitor(
-            rx_audio_data,
-            rx_silent_user_events,
-            tx_transcription_requests,
-        );
+        let audio_buffer_manager_task =
+            Some(crate::model::audio_buffer::AudioBufferManager::monitor(
+                rx_audio_data,
+                rx_silent_user_events,
+                shutdown_token.clone(),
+                tx_transcription_requests,
+            ));
 
         let mut driver = songbird::Driver::new(config);
         packet_handler::PacketHandler::register(
@@ -62,15 +65,22 @@ impl Discrivener {
             tx_voice_activity,
         );
 
-        let whisper_task =
-            whisper::Whisper::load_and_monitor(model_path, rx_transcription_requests);
+        let whisper_task = Some(whisper::Whisper::load_and_monitor(
+            model_path,
+            rx_transcription_requests,
+            shutdown_token.clone(),
+        ));
 
-        let api_task = tokio::spawn(Self::start_api_task(rx_api_events, event_callback));
+        let api_task = Some(tokio::spawn(Self::start_api_task(
+            rx_api_events,
+            event_callback,
+        )));
 
         Self {
             api_task,
             audio_buffer_manager_task,
             driver,
+            shutdown_token,
             voice_activity_task,
             whisper_task,
         }
@@ -96,10 +106,19 @@ impl Discrivener {
         self.driver.connect(connection_info).await
     }
 
-    pub fn disconnect(&mut self) {
+    pub async fn disconnect(&mut self) {
         self.driver.leave();
+        self.shutdown_token.cancel();
 
-        // todo: shutdown queues and workers
+        // join all our tasks
+        self.api_task.take().unwrap().await.unwrap();
+        self.audio_buffer_manager_task
+            .take()
+            .unwrap()
+            .await
+            .unwrap();
+        self.voice_activity_task.take().unwrap().await.unwrap();
+        self.whisper_task.take().unwrap().await.unwrap();
     }
 
     async fn start_api_task(

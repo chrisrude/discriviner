@@ -27,7 +27,7 @@ async fn tokio_main(cli: Cli) {
     }
 
     signal::ctrl_c().await.unwrap();
-    discrivener.disconnect();
+    discrivener.disconnect().await;
 }
 
 /// Connect to a discord voice channel

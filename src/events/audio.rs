@@ -6,7 +6,7 @@ use crate::model::types::{self, DiscordAudioSample, DiscordRtcTimestamp, UserId}
 
 #[derive(Debug)]
 pub(crate) struct DiscordAudioData {
-    pub audio: Vec<DiscordAudioSample>,
+    pub discord_audio: Vec<DiscordAudioSample>,
     pub timestamp: DiscordRtcTimestamp,
     pub user_id: UserId,
 }

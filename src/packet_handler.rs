@@ -71,7 +71,7 @@ impl PacketHandler {
 
     fn on_audio(
         &self,
-        audio: &[DiscordAudioSample],
+        discord_audio: &[DiscordAudioSample],
         timestamp: DiscordRtcTimestamp,
         ssrc: types::Ssrc,
     ) {
@@ -79,7 +79,7 @@ impl PacketHandler {
             self.tx_audio_data
                 .send(DiscordAudioData {
                     user_id,
-                    audio: audio.to_vec(),
+                    discord_audio: discord_audio.to_vec(),
                     timestamp,
                 })
                 .unwrap();
@@ -197,14 +197,14 @@ pub(crate) fn register_events(raw_handler: PacketHandler, driver: &mut songbird:
             packet_handler: handler.clone(),
             handler: |ctx, my_handler| {
                 if let EventContext::VoicePacket(VoiceData {
-                    audio: Some(audio),
+                    audio: Some(discord_audio),
                     packet,
                     ..
                 }) = ctx
                 {
                     // An event which fires for every received audio packet,
                     // containing the decoded data.
-                    my_handler.on_audio(audio, packet.timestamp.0, packet.ssrc);
+                    my_handler.on_audio(discord_audio, packet.timestamp.0, packet.ssrc);
                 }
             },
         },

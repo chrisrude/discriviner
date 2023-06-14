@@ -11,8 +11,9 @@ use crate::{
 use super::types::{self, WhisperAudioSample, WHISPER_SAMPLES_PER_MILLISECOND};
 
 pub(crate) struct Whisper {
-    whisper_context: Arc<WhisperContext>,
     rx_transcription_requests: tokio::sync::mpsc::UnboundedReceiver<TranscriptionRequest>,
+    shutdown_token: tokio_util::sync::CancellationToken,
+    whisper_context: Arc<WhisperContext>,
 }
 
 impl Whisper {
@@ -20,6 +21,7 @@ impl Whisper {
     pub fn load_and_monitor(
         model_path: String,
         rx_transcription_requests: tokio::sync::mpsc::UnboundedReceiver<TranscriptionRequest>,
+        shutdown_token: tokio_util::sync::CancellationToken,
     ) -> JoinHandle<()> {
         let path = Path::new(model_path.as_str());
         if !path.exists() {
@@ -34,6 +36,7 @@ impl Whisper {
 
         let mut whisper = Self {
             rx_transcription_requests,
+            shutdown_token,
             whisper_context,
         };
 
@@ -43,35 +46,49 @@ impl Whisper {
     }
 
     async fn convert_forever(&mut self) {
-        while let Some(TranscriptionRequest {
+        // select on both the shutdown token and the transcription requests
+        tokio::select! {
+            _ = self.shutdown_token.cancelled() => {
+                // we're done
+                return;
+            }
+            Some(transcription_request) = self.rx_transcription_requests.recv() => {
+                self.process_transcription_request(transcription_request).await;
+
+            }
+        }
+    }
+
+    async fn process_transcription_request(
+        &self,
+        TranscriptionRequest {
             audio_data,
             previous_tokens,
             response_queue,
             start_timestamp,
             user_id,
-        }) = self.rx_transcription_requests.recv().await
-        {
-            let processing_start = std::time::Instant::now();
-            let whisper_context_clone = self.whisper_context.clone();
-            let conversion_task = tokio::task::spawn_blocking(move || {
-                Self::audio_to_text(&whisper_context_clone, audio_data, previous_tokens)
-            });
+        }: TranscriptionRequest,
+    ) {
+        let processing_start = std::time::Instant::now();
+        let whisper_context_clone = self.whisper_context.clone();
+        let conversion_task = tokio::task::spawn_blocking(move || {
+            Self::audio_to_text(&whisper_context_clone, audio_data, previous_tokens)
+        });
 
-            let (text_segments, result_tokens, audio_duration) = conversion_task.await.unwrap();
+        let (text_segments, result_tokens, audio_duration) = conversion_task.await.unwrap();
 
-            let response = TranscriptionResponse {
-                tokens: result_tokens,
-                message: api_types::TranscribedMessage {
-                    start_timestamp,
-                    user_id,
-                    text_segments,
-                    audio_duration,
-                    processing_time: processing_start.elapsed(),
-                },
-            };
+        let response = TranscriptionResponse {
+            tokens: result_tokens,
+            message: api_types::TranscribedMessage {
+                start_timestamp,
+                user_id,
+                text_segments,
+                audio_duration,
+                processing_time: processing_start.elapsed(),
+            },
+        };
 
-            response_queue.send(response).unwrap();
-        }
+        response_queue.send(response).unwrap();
     }
 
     /// This will take a long time to run, don't call it

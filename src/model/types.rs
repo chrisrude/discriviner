@@ -21,6 +21,8 @@ pub const AUDIO_TO_RECORD_MILLISECONDS: usize = AUDIO_TO_RECORD_SECONDS * 1000;
 pub const WHISPER_SAMPLES_PER_SECOND: usize = 16000;
 pub const WHISPER_SAMPLES_PER_MILLISECOND: usize = WHISPER_SAMPLES_PER_SECOND / 1000;
 
+pub const RTC_CLOCK_SAMPLES_PER_SECOND: usize = 8000;
+
 // being a whole number. If this is not the case, we'll need to
 // do some more complicated resampling.
 pub const BITRATE_CONVERSION_RATIO: usize = DISCORD_SAMPLES_PER_SECOND / WHISPER_SAMPLES_PER_SECOND;
@@ -39,6 +41,9 @@ pub const MIN_AUDIO_THRESHOLD_MS: u32 = 500;
 pub const TOKENS_TO_KEEP: usize = 1024;
 
 pub const USER_SILENCE_TIMEOUT_MS: u64 = 2000;
+
+pub const DISCORD_AUDIO_MAX_VALUE_TWO_SAMPLES: WhisperAudioSample =
+    DISCORD_AUDIO_MAX_VALUE * DISCORD_AUDIO_CHANNELS as WhisperAudioSample;
 
 pub type DiscordAudioSample = i16;
 pub type DiscordRtcTimestamp = Wrapping<u32>;
