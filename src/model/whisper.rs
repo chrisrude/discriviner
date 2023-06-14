@@ -102,7 +102,7 @@ impl Whisper {
 
         // actually convert audio to text.  Takes a while.
         state
-            .full(Self::make_params(&previous_tokens), &audio_data[..])
+            .full(Self::make_params(&previous_tokens), audio_data)
             .unwrap();
 
         let num_segments = state.full_n_segments().unwrap();
@@ -121,7 +121,7 @@ impl Whisper {
         (result_segments, result_tokens, audio_duration)
     }
 
-    fn make_params<'a>(previous_tokens: &'a Vec<types::WhisperToken>) -> FullParams<'a, 'a> {
+    fn make_params(previous_tokens: &Vec<types::WhisperToken>) -> FullParams<'_, '_> {
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
 
         params.set_print_special(false);
