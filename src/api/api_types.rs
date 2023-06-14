@@ -1,7 +1,13 @@
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
+use songbird::events::context_data;
+
 pub type UserId = crate::model::types::UserId;
+
+// all this is because the songbird types don't implement Serialize
+// and Deserialize, and we want to use that to print these structures
+// as JSON
 
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, Serialize, Deserialize)]
 pub struct UserJoinData {
@@ -160,5 +166,57 @@ impl TranscribedMessage {
             result.push(' ')
         }
         result
+    }
+}
+
+impl From<context_data::DisconnectKind> for DisconnectKind {
+    fn from(value: context_data::DisconnectKind) -> DisconnectKind {
+        match value {
+            context_data::DisconnectKind::Connect => DisconnectKind::Connect,
+            context_data::DisconnectKind::Reconnect => DisconnectKind::Reconnect,
+            context_data::DisconnectKind::Runtime => DisconnectKind::Runtime,
+            _ => DisconnectKind::Unknown,
+        }
+    }
+}
+
+impl From<context_data::DisconnectReason> for DisconnectReason {
+    fn from(value: context_data::DisconnectReason) -> DisconnectReason {
+        match value {
+            context_data::DisconnectReason::AttemptDiscarded => DisconnectReason::AttemptDiscarded,
+            context_data::DisconnectReason::Internal => DisconnectReason::Internal,
+            context_data::DisconnectReason::Io => DisconnectReason::Io,
+            context_data::DisconnectReason::ProtocolViolation => {
+                DisconnectReason::ProtocolViolation
+            }
+            context_data::DisconnectReason::TimedOut => DisconnectReason::TimedOut,
+            context_data::DisconnectReason::WsClosed(code) => {
+                DisconnectReason::WsClosed(code.map(|c| c as u32))
+            }
+            _ => DisconnectReason::Unknown,
+        }
+    }
+}
+
+impl From<&context_data::ConnectData<'_>> for ConnectData {
+    fn from(value: &context_data::ConnectData<'_>) -> Self {
+        ConnectData {
+            channel_id: value.channel_id.map(|c| c.0),
+            guild_id: value.guild_id.0,
+            session_id: value.session_id.to_string(),
+            server: value.server.to_string(),
+        }
+    }
+}
+
+impl From<&context_data::DisconnectData<'_>> for DisconnectData {
+    fn from(value: &context_data::DisconnectData<'_>) -> Self {
+        DisconnectData {
+            kind: DisconnectKind::from(value.kind),
+            reason: value.reason.map(DisconnectReason::from),
+            channel_id: value.channel_id.map(|c| c.0),
+            guild_id: value.guild_id.0,
+            session_id: value.session_id.to_string(),
+        }
     }
 }

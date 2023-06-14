@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::api::api_types;
-use crate::events::audio::{DiscordVoiceData, VoiceActivityData};
+use crate::events::audio::{ConversionRequest, DiscordAudioData, VoiceActivityData};
 use crate::model::{types, voice_activity, whisper};
 use crate::packet_handler;
 
@@ -16,7 +16,7 @@ pub struct Discrivener {
     audio_buffer_manager_task: JoinHandle<()>,
     driver: songbird::Driver,
     handler: Arc<packet_handler::PacketHandler>,
-    whisper: whisper::Whisper,
+    whisper_task: JoinHandle<()>,
     voice_activity_task: JoinHandle<()>,
 }
 
@@ -29,11 +29,14 @@ impl Discrivener {
         config.decode_mode = songbird::driver::DecodeMode::Decode; // convert incoming audio from Opus to PCM
 
         let (audio_events_sender, audio_events_receiver) =
-            tokio::sync::mpsc::unbounded_channel::<DiscordVoiceData>();
+            tokio::sync::mpsc::unbounded_channel::<DiscordAudioData>();
         let (user_api_events_sender, user_api_events_receiver) =
             tokio::sync::mpsc::unbounded_channel::<api_types::VoiceChannelEvent>();
         let (voice_activity_events_sender, voice_activity_events_receiver) =
             tokio::sync::mpsc::unbounded_channel::<VoiceActivityData>();
+
+        let (conversion_requests_sender, conversion_requests_receiver) =
+            tokio::sync::mpsc::unbounded_channel::<ConversionRequest>();
 
         let (silent_user_events_sender, silent_user_events_receiver) =
             tokio::sync::mpsc::unbounded_channel::<u64>();
@@ -49,6 +52,7 @@ impl Discrivener {
         let audio_buffer_manager_task = crate::model::audio_buffer::AudioBufferManager::monitor(
             audio_events_receiver,
             silent_user_events_receiver,
+            conversion_requests_sender,
         );
 
         let mut driver = songbird::Driver::new(config);
@@ -61,14 +65,13 @@ impl Discrivener {
         )
         .await;
 
-        let whisper = whisper::Whisper::load(model_path);
+        let whisper_task =
+            whisper::Whisper::load_and_monitor(model_path, conversion_requests_receiver);
 
         let api_task = tokio::spawn(Self::start_api_task(
             user_api_events_receiver,
             event_callback,
         ));
-
-        
 
         Self {
             api_task,
@@ -76,7 +79,7 @@ impl Discrivener {
             driver,
             handler,
             voice_activity_task,
-            whisper,
+            whisper_task,
         }
     }
 

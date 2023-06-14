@@ -1,25 +1,26 @@
-use std::{path::Path, sync::Arc};
+use std::path::Path;
 
+use tokio::task::JoinHandle;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext};
 
-pub struct Whisper {
-    whisper_context: Arc<WhisperContext>,
+use crate::{
+    api::api_types,
+    events::audio::{ConversionRequest, ConversionResponse},
+};
+
+use super::types;
+
+pub struct Whisper<'a> {
+    whisper_context: WhisperContext,
+    rx_queue: tokio::sync::mpsc::UnboundedReceiver<ConversionRequest<'a>>,
 }
 
-fn make_params() -> FullParams<'static, 'static> {
-    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-
-    params.set_print_special(false);
-    params.set_print_progress(false);
-    params.set_print_realtime(false);
-    params.set_print_timestamps(false);
-
-    params
-}
-
-impl Whisper {
+impl<'a> Whisper<'a> {
     /// Load a model from the given path
-    pub fn load(model_path: String) -> Self {
+    pub fn load_and_monitor(
+        model_path: String,
+        rx_queue: tokio::sync::mpsc::UnboundedReceiver<ConversionRequest>,
+    ) -> JoinHandle<()> {
         let path = Path::new(model_path.as_str());
         if !path.exists() {
             panic!("Model file does not exist: {}", path.to_str().unwrap());
@@ -29,45 +30,92 @@ impl Whisper {
         }
 
         let whisper_context =
-            Arc::new(WhisperContext::new(model_path.as_str()).expect("failed to load model"));
+            WhisperContext::new(model_path.as_str()).expect("failed to load model");
 
-        Self { whisper_context }
+        let whisper = Self {
+            rx_queue,
+            whisper_context,
+        };
+
+        tokio::task::spawn_blocking(move || {
+            async { whisper.convert_forever().await };
+            ()
+        })
+    }
+
+    async fn convert_forever(&mut self) {
+        while let Some(ConversionRequest {
+            audio_data,
+            previous_tokens,
+            response_queue,
+            timestamp_start,
+            user_id,
+        }) = self.rx_queue.recv().await
+        {
+            let (result_segments, result_tokens) = self.audio_to_text(audio_data, previous_tokens);
+
+            let num_segments = result_segments.len();
+
+            let response = ConversionResponse {
+                tokens: result_tokens,
+                message: api_types::TranscribedMessage {
+                    timestamp: 0, // TODO: SET
+                    user_id: 0,   // TODO: SET
+                    text_segments: result_segments,
+                    audio_duration_ms: 0,  // TODO: SET
+                    processing_time_ms: 0, // TODO: SET
+                },
+                finalized_segment_count: num_segments - 1,
+            };
+
+            response_queue.send(response).unwrap();
+        }
+    }
+
+    /// This will take a long time to run, don't call it
+    /// on a tokio event thread.
+    /// ctx came from load_model
+    /// audio data should be is f32, 16KHz, mono
+    fn audio_to_text(
+        &self,
+        audio_data: &[types::WhisperAudioSample],
+        previous_tokens: Option<&[types::WhisperToken]>,
+    ) -> (Vec<api_types::TextSegment>, Vec<types::WhisperToken>) {
+        let mut state = self.whisper_context.create_state().unwrap();
+
+        // actually convert audio to text.  Takes a while.
+        state
+            .full(self.make_params(previous_tokens), &audio_data[..])
+            .unwrap();
+
+        let num_segments = state.full_n_segments().unwrap();
+        let mut result_segments =
+            Vec::<api_types::TextSegment>::with_capacity(num_segments as usize);
+        let mut result_tokens = Vec::<types::WhisperToken>::new();
+        for i in 0..num_segments {
+            result_segments.push(api_types::TextSegment {
+                text: state.full_get_segment_text(i).unwrap().to_string(),
+                start_offset_ms: state.full_get_segment_t0(i).unwrap() as u32,
+                end_offset_ms: state.full_get_segment_t1(i).unwrap() as u32,
+            });
+
+            result_tokens.push(state.full_n_tokens(i).unwrap())
+        }
+        (result_segments, result_tokens)
+    }
+
+    fn make_params(&self, previous_tokens: Option<&[types::WhisperToken]>) -> FullParams {
+        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+
+        params.set_print_special(false);
+        params.set_print_progress(false);
+        params.set_print_realtime(false);
+        params.set_print_timestamps(false);
+
+        if let Some(tokens) = previous_tokens {
+            params.set_tokens(tokens);
+        }
+
+        params
     }
 }
-
-// /// ctx came from load_model
-// /// audio data should be is f32, 16KHz, mono
-// fn audio_to_text(
-//     whisper_context: &Arc<WhisperContext>,
-//     audio_data: Vec<types::WhisperAudioSample>,
-//     last_transcription: Option<LastTranscriptionData>,
-// ) -> Vec<api_types::TextSegment> {
-//     let mut state = whisper_context.create_state().unwrap();
-
-//     let mut params = make_params();
-
-//     // if we have a last_transcription, add it to the state
-//     let last_tokens: LastTranscriptionData;
-//     if let Some(last_tokens_tmp) = last_transcription {
-//         // assign to a variable to ensure lifetime is long enough
-//         last_tokens = last_tokens_tmp;
-//         params.set_tokens(&last_tokens.tokens[..]);
-//     }
-
-//     // actually convert audio to text.  Takes a while.
-//     state.full(params, &audio_data[..]).unwrap();
-
-//     // todo: use a different context / token history for each user
-//     // see https://github.com/ggerganov/whisper.cpp/blob/57543c169e27312e7546d07ed0d8c6eb806ebc36/examples/stream/stream.cpp
-
-//     let num_segments = state.full_n_segments().unwrap();
-//     let mut result = Vec::<api_types::TextSegment>::with_capacity(num_segments as usize);
-//     for i in 0..num_segments {
-//         result.push(api_types::TextSegment {
-//             text: state.full_get_segment_text(i).unwrap().to_string(),
-//             start_offset_ms: state.full_get_segment_t0(i).unwrap() as u32,
-//             end_offset_ms: state.full_get_segment_t1(i).unwrap() as u32,
-//         });
-//     }
-//     result
-// }

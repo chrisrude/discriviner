@@ -4,10 +4,6 @@ use std::sync::Arc;
 /// Tracks when users have stopped speaking, and fires a callback.
 use async_trait::async_trait;
 
-use songbird::events::context_data::ConnectData;
-use songbird::events::context_data::DisconnectData;
-use songbird::events::context_data::DisconnectKind;
-use songbird::events::context_data::DisconnectReason;
 use songbird::events::context_data::SpeakingUpdateData;
 use songbird::events::context_data::VoiceData;
 use songbird::model::payload::Speaking;
@@ -17,7 +13,7 @@ use std::sync::RwLock;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::api::api_types;
-use crate::events::audio::DiscordVoiceData;
+use crate::events::audio::DiscordAudioData;
 use crate::events::audio::VoiceActivityData;
 use crate::model::types;
 use crate::model::types::DiscordAudioSample;
@@ -25,7 +21,7 @@ use crate::model::types::DiscordRtcTimestamp;
 
 pub(crate) struct PacketHandler {
     ssrc_to_user_id: RwLock<std::collections::HashMap<types::Ssrc, types::UserId>>,
-    audio_events_sender: UnboundedSender<DiscordVoiceData>,
+    audio_events_sender: UnboundedSender<DiscordAudioData>,
     user_api_events_sender: UnboundedSender<api_types::VoiceChannelEvent>,
     voice_activity_events_sender: UnboundedSender<VoiceActivityData>,
 }
@@ -33,7 +29,7 @@ pub(crate) struct PacketHandler {
 impl PacketHandler {
     pub(crate) async fn new(
         driver: &mut songbird::Driver,
-        audio_events_sender: UnboundedSender<DiscordVoiceData>,
+        audio_events_sender: UnboundedSender<DiscordAudioData>,
         user_api_events_sender: UnboundedSender<api_types::VoiceChannelEvent>,
         voice_activity_events_sender: UnboundedSender<VoiceActivityData>,
     ) -> Arc<Self> {
@@ -82,7 +78,7 @@ impl PacketHandler {
     ) {
         if let Some(user_id) = self.user_id_from_ssrc(ssrc) {
             self.audio_events_sender
-                .send(DiscordVoiceData {
+                .send(DiscordAudioData {
                     user_id,
                     audio: audio.to_vec(),
                     timestamp,
@@ -120,24 +116,6 @@ impl PacketHandler {
                     joined: false,
                 },
             ))
-            .unwrap();
-    }
-
-    fn on_driver_connect(&self, connect_data: api_types::ConnectData) {
-        self.user_api_events_sender
-            .send(api_types::VoiceChannelEvent::Connect(connect_data))
-            .unwrap();
-    }
-
-    fn on_driver_disconnect(&self, disconnect_data: api_types::DisconnectData) {
-        self.user_api_events_sender
-            .send(api_types::VoiceChannelEvent::Disconnect(disconnect_data))
-            .unwrap();
-    }
-
-    fn on_driver_reconnect(&self, connect_data: api_types::ConnectData) {
-        self.user_api_events_sender
-            .send(api_types::VoiceChannelEvent::Reconnect(connect_data))
             .unwrap();
     }
 
@@ -251,20 +229,13 @@ pub(crate) async fn register_events(handler: &Arc<PacketHandler>, driver: &mut s
         MyEventHandler {
             packet_handler: handler.clone(),
             handler: |ctx, my_handler| {
-                if let EventContext::DriverConnect(ConnectData {
-                    guild_id,
-                    channel_id,
-                    server,
-                    session_id,
-                    ..
-                }) = ctx
-                {
-                    my_handler.on_driver_connect(api_types::ConnectData {
-                        guild_id: guild_id.0,
-                        channel_id: channel_id.map(|c| c.0),
-                        session_id: session_id.to_string(),
-                        server: server.to_string(),
-                    })
+                if let EventContext::DriverConnect(connect_data) = ctx {
+                    my_handler
+                        .user_api_events_sender
+                        .send(api_types::VoiceChannelEvent::Connect(
+                            api_types::ConnectData::from(connect_data),
+                        ))
+                        .unwrap();
                 }
             },
         },
@@ -274,22 +245,13 @@ pub(crate) async fn register_events(handler: &Arc<PacketHandler>, driver: &mut s
         MyEventHandler {
             packet_handler: handler.clone(),
             handler: |ctx, my_handler| {
-                if let EventContext::DriverDisconnect(DisconnectData {
-                    kind,
-                    reason,
-                    channel_id,
-                    guild_id,
-                    session_id,
-                    ..
-                }) = ctx
-                {
-                    my_handler.on_driver_disconnect(api_types::DisconnectData {
-                        kind: api_types::DisconnectKind::from(*kind),
-                        reason: reason.map(api_types::DisconnectReason::from),
-                        channel_id: channel_id.map(|c| c.0),
-                        guild_id: guild_id.0,
-                        session_id: session_id.to_string(),
-                    })
+                if let EventContext::DriverDisconnect(disconnect_data) = ctx {
+                    my_handler
+                        .user_api_events_sender
+                        .send(api_types::VoiceChannelEvent::Disconnect(
+                            api_types::DisconnectData::from(disconnect_data),
+                        ))
+                        .unwrap();
                 }
             },
         },
@@ -299,49 +261,15 @@ pub(crate) async fn register_events(handler: &Arc<PacketHandler>, driver: &mut s
         MyEventHandler {
             packet_handler: handler.clone(),
             handler: |ctx, my_handler| {
-                if let EventContext::DriverReconnect(ConnectData {
-                    guild_id,
-                    channel_id,
-                    server,
-                    session_id,
-                    ..
-                }) = ctx
-                {
-                    my_handler.on_driver_reconnect(api_types::ConnectData {
-                        guild_id: guild_id.0,
-                        channel_id: channel_id.map(|c| c.0),
-                        session_id: session_id.to_string(),
-                        server: server.to_string(),
-                    })
+                if let EventContext::DriverReconnect(connect_data) = ctx {
+                    my_handler
+                        .user_api_events_sender
+                        .send(api_types::VoiceChannelEvent::Reconnect(
+                            api_types::ConnectData::from(connect_data),
+                        ))
+                        .unwrap();
                 }
             },
         },
     );
-}
-
-impl api_types::DisconnectKind {
-    fn from(kind: DisconnectKind) -> api_types::DisconnectKind {
-        match kind {
-            DisconnectKind::Connect => api_types::DisconnectKind::Connect,
-            DisconnectKind::Reconnect => api_types::DisconnectKind::Reconnect,
-            DisconnectKind::Runtime => api_types::DisconnectKind::Runtime,
-            _ => api_types::DisconnectKind::Unknown,
-        }
-    }
-}
-
-impl api_types::DisconnectReason {
-    fn from(reason: DisconnectReason) -> api_types::DisconnectReason {
-        match reason {
-            DisconnectReason::AttemptDiscarded => api_types::DisconnectReason::AttemptDiscarded,
-            DisconnectReason::Internal => api_types::DisconnectReason::Internal,
-            DisconnectReason::Io => api_types::DisconnectReason::Io,
-            DisconnectReason::ProtocolViolation => api_types::DisconnectReason::ProtocolViolation,
-            DisconnectReason::TimedOut => api_types::DisconnectReason::TimedOut,
-            DisconnectReason::WsClosed(code) => {
-                api_types::DisconnectReason::WsClosed(code.map(|c| c as u32))
-            }
-            _ => api_types::DisconnectReason::Unknown,
-        }
-    }
 }

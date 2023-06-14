@@ -1,33 +1,46 @@
-use std::{
-    collections::{HashMap, VecDeque},
-    sync::Mutex,
-};
+use std::collections::{HashMap, VecDeque};
 
 use tokio::{sync, task};
 
-use crate::events::audio::{AudioBuffer, AudioBufferForUser, DiscordVoiceData};
+use crate::events::audio::{ConversionRequest, DiscordAudioData};
 
-use super::types;
+use super::types::{self, DiscordRtcTimestamp, UserId, WhisperAudioSample, WhisperToken};
+
+pub struct AudioBuffer {
+    /// Audio data lives here.
+    pub buffer: std::collections::VecDeque<WhisperAudioSample>,
+
+    /// The timestamp of the first sample in the buffer.
+    /// Taken from the RTC packet.
+    /// The RTC timestamp typically uses an 8khz clock.
+    /// So a 20ms buffer would have a timestamp increment
+    /// of 160 from the previous buffer.
+    pub head_timestamp: DiscordRtcTimestamp,
+
+    /// The timestamp of the last sample in the buffer.
+    pub last_write_timestamp: DiscordRtcTimestamp,
+
+    /// The timestamp of the most recent sample we've sent
+    /// to the transcription worker.
+    pub last_transcription_timestamp: DiscordRtcTimestamp,
+
+    /// User ID of the user that this buffer is for.
+    pub user_id: UserId,
+
+    /// The most recent tokens we've seen from this
+    /// user.  Used to help inform the decoder.
+    pub last_tokens: std::collections::VecDeque<WhisperToken>, // TOKENS_TO_KEEP
+}
 
 impl AudioBuffer {
-    pub(crate) fn new() -> Self {
+    fn new() -> Self {
         Self {
+            user_id: 0, // TODO
             buffer: VecDeque::with_capacity(types::WHISPER_AUDIO_BUFFER_SIZE),
             head_timestamp: std::num::Wrapping(0), // todo: sentinel value?
             last_transcription_timestamp: std::num::Wrapping(0),
             last_write_timestamp: std::num::Wrapping(0),
-        }
-    }
-}
-
-impl AudioBufferForUser {
-    fn new(user_id: types::UserId) -> Self {
-        Self {
-            user_id,
-            buffers: [AudioBuffer::new(), AudioBuffer::new()],
-            current_write_buffer: Mutex::new(0),
             last_tokens: VecDeque::with_capacity(types::TOKENS_TO_KEEP),
-            worker_task: Mutex::new(None),
         }
     }
 }
@@ -37,12 +50,16 @@ impl AudioBufferForUser {
 pub(crate) struct AudioBufferManager {
     // we'll have a single task which monitors this queue for new
     // audio data and then pushes it into the appropriate buffer.
-    rx_queue_voice: sync::mpsc::UnboundedReceiver<DiscordVoiceData>,
+    rx_queue_voice: sync::mpsc::UnboundedReceiver<DiscordAudioData>,
 
     // this queue is used to notify the audio buffer manager that
     // a user has stopped talking.  We'll use this to know when
     // to trigger our final transcription.
     rx_queue_silent_user_events: sync::mpsc::UnboundedReceiver<types::UserId>,
+
+    // this is used to send transcription requests to Whisper, and
+    // to receive the results.
+    tx_queue_conversion_requests: sync::mpsc::UnboundedSender<ConversionRequest<'_>>,
 
     // these are the buffers which we've assigned to a user
     // in the conversation.  We'll keep them around until the
@@ -58,12 +75,14 @@ pub(crate) struct AudioBufferManager {
 
 impl AudioBufferManager {
     pub fn monitor(
-        rx_queue_voice: sync::mpsc::UnboundedReceiver<DiscordVoiceData>,
+        rx_queue_voice: sync::mpsc::UnboundedReceiver<DiscordAudioData>,
         rx_queue_silent_user_events: sync::mpsc::UnboundedReceiver<types::UserId>,
+        tx_queue_conversion_requests: sync::mpsc::UnboundedSender<ConversionRequest>,
     ) -> task::JoinHandle<()> {
         let mut audio_buffer_manager = AudioBufferManager {
             rx_queue_voice,
             rx_queue_silent_user_events,
+            tx_queue_conversion_requests,
             active_buffers: HashMap::new(),
             reserve_buffers: VecDeque::new(),
         };
