@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 
-use tokio::{signal, sync, task};
+use tokio::{sync, task};
 use tokio_util::sync::CancellationToken;
 
 use crate::events::audio::{DiscordAudioData, TranscriptionRequest};
@@ -178,10 +178,9 @@ impl<'a> AudioBufferManager {
     async fn loop_forever(&mut self) {
         loop {
             tokio::select! {
-                _ = signal::ctrl_c() => {
-                    // we are done
+                _ = self.shutdown_token.cancelled() => {
                     return;
-                },
+                }
                 Some(
                     DiscordAudioData {
                         user_id,
