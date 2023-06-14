@@ -142,7 +142,7 @@ where
     }
 }
 
-pub(crate) async fn register_events(raw_handler: PacketHandler, driver: &mut songbird::Driver) {
+pub(crate) fn register_events(raw_handler: PacketHandler, driver: &mut songbird::Driver) {
     let handler = Arc::new(raw_handler);
     // event handlers for the songbird driver
     driver.add_global_event(
@@ -259,7 +259,7 @@ pub(crate) async fn register_events(raw_handler: PacketHandler, driver: &mut son
     driver.add_global_event(
         songbird::CoreEvent::DriverReconnect.into(),
         MyEventHandler {
-            packet_handler: handler.clone(),
+            packet_handler: handler,
             handler: |ctx, my_handler| {
                 if let EventContext::DriverReconnect(connect_data) = ctx {
                     my_handler
