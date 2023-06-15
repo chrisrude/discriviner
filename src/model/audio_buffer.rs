@@ -186,11 +186,15 @@ impl AudioBuffer {
         // let _segments = response.0.segments;
         // let _audio_duration = response.0.audio_duration;
 
-        // todo: finish more
+        // todo: remove everything but the last segment
+        // fire API event for transcription
+        // if we have been silent, fire API event for the last segment too
     }
 
     fn handle_user_silence(&mut self) {
-        // todo: finish
+        // todo: if more audio has come in since the last time we
+        // ran a transcription, run a final one
+        // otherwise, just send the last segment
     }
 
     /// Removes the given amount of audio from the buffer,
