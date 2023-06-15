@@ -3,7 +3,11 @@ use std::{
     time::Duration,
 };
 
-use tokio::{sync, task};
+use futures::{stream::FuturesUnordered, TryStreamExt};
+use tokio::{
+    sync,
+    task::{self, JoinHandle},
+};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -57,7 +61,8 @@ impl AudioBuffer {
         &mut self,
         timestamp: DiscordRtcTimestamp,
         discord_audio: &Vec<types::DiscordAudioSample>,
-    ) {
+    ) -> Option<TranscriptionRequest> {
+        let original_buffer_len = self.buffer.len();
         if self.head_timestamp.is_none() {
             self.head_timestamp = Some(timestamp);
         }
@@ -66,19 +71,19 @@ impl AudioBuffer {
             timestamp,
         );
         let end = offset + discord_audio.len() / types::BITRATE_CONVERSION_RATIO;
-        if end > self.buffer.len() {
+        if end > original_buffer_len {
             // todo: drop audio instead of panicking?
             panic!("buffer overflow");
         }
 
-        if self.buffer.len() > offset {
+        if original_buffer_len > offset {
             // todo: handle more gracefully?  Can songbird send us
             // packets out of order?
             panic!("received out-of-order packet")
         }
 
-        if self.buffer.len() < offset {
-            let num_samples_to_insert = offset - self.buffer.len();
+        if original_buffer_len < offset {
+            let num_samples_to_insert = offset - original_buffer_len;
             eprintln!(
                 "skip in audio, padding with silence for {} ms",
                 num_samples_to_insert / WHISPER_SAMPLES_PER_MILLISECOND
@@ -89,6 +94,21 @@ impl AudioBuffer {
         }
 
         self.resample_audio_from_discord_to_whisper(discord_audio);
+
+        // if we've gone from one multiple of 5 seconds to the next, kick
+        // off a transcription request.
+        if original_buffer_len / types::WHISPER_SAMPLES_PER_SECOND
+            != self.buffer.len() / types::WHISPER_SAMPLES_PER_SECOND
+        {
+            // kick off a transcription request
+            return Some(self.create_transcription_request());
+        }
+        None
+    }
+
+    fn create_transcription_request(&self) -> TranscriptionRequest {
+        // todo
+        todo!()
     }
 
     fn rtc_timestamp_delta_to_whisper_audio_delta(
@@ -128,12 +148,16 @@ impl AudioBuffer {
     /////////////////////////////////////////////////
     // removing audio from the buffer
 
-    fn handle_transcription_response(&mut self, response: TranscriptionResponse) {
-        let _start_timestamp = response.0.start_timestamp;
-        let _segments = response.0.segments;
-        let _audio_duration = response.0.audio_duration;
+    fn handle_transcription_response(&mut self, _response: &TranscriptionResponse) {
+        // let _start_timestamp = response.0.start_timestamp;
+        // let _segments = response.0.segments;
+        // let _audio_duration = response.0.audio_duration;
 
         // todo: finish more
+    }
+
+    fn handle_user_silence(&mut self) {
+        // todo: finish
     }
 
     /// Removes the given amount of audio from the buffer,
@@ -159,6 +183,10 @@ pub(crate) struct AudioBufferManager {
     // user leaves, as we may need to use them again.  When
     // discarded, they will be returned to reserve_buffers.
     active_buffers: HashMap<types::UserId, AudioBuffer>,
+
+    // this is a list of all of the transcription requests which
+    // we've sent to Whisper, but which have not yet returned.
+    pending_transcription_requests: FuturesUnordered<JoinHandle<TranscriptionResponse>>,
 
     // these are buffers which we've pre-allocated, but which are
     // not currently in use.  We'll keep them around so that we
@@ -191,6 +219,7 @@ impl<'a> AudioBufferManager {
     ) -> task::JoinHandle<()> {
         let mut audio_buffer_manager = AudioBufferManager {
             active_buffers: HashMap::new(),
+            pending_transcription_requests: FuturesUnordered::new(),
             reserve_buffers: VecDeque::new(),
             rx_audio_data,
             rx_silent_user_events,
@@ -239,13 +268,27 @@ impl<'a> AudioBufferManager {
                     }
                 ) = self.rx_audio_data.recv() => {
                     self.with_buffer_for_user(user_id, |buffer| {
-                        buffer.add_audio(timestamp, &discord_audio);
+                        // might produce a transcription request
+                        if let Some(transcription_request) = buffer.add_audio(timestamp, &discord_audio) {
+                            let request = self.tx_transcription_requests.send(transcription_request);
+                            // todo: create oneshot
+                            self.pending_transcription_requests.push(request);
+                        }
+                    });
+                }
+                Ok(Some(transcription_response)) = self.pending_transcription_requests.try_next() => {
+                    let user_id = transcription_response.0.user_id;
+                    self.with_buffer_for_user(user_id, |buffer| {
+                        buffer.handle_transcription_response(&transcription_response);
+                    });
+                }
+                Some(user_id) = self.rx_silent_user_events.recv() => {
+                    self.with_buffer_for_user(user_id, |buffer| {
+                        // might produce a transcription request
+                        buffer.handle_user_silence();
                     });
                 }
                 // todo: also, every 5 seconds timeout
-                Some(_user_id) = self.rx_silent_user_events.recv() => {
-                    // todo: self.handle_silent_user_event(user_id).await;
-                }
             }
         }
     }

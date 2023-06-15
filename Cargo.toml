@@ -18,6 +18,9 @@ version = "0.1.68"
 [dependencies.bytes]
 version = "1.4.0"
 
+[dependencies.futures]
+version = "0.3.28"
+
 [dependencies.serde]
 version = "1.0.163"
 

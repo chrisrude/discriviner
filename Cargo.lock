@@ -442,6 +442,7 @@ dependencies = [
  "clap",
  "colored",
  "discrivener",
+ "futures",
  "serde",
  "serde_json",
  "serde_with",

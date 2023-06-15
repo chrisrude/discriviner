@@ -32,6 +32,11 @@ pub const WHISPER_AUDIO_BUFFER_SIZE: usize = WHISPER_SAMPLES_PER_SECOND * AUDIO_
 /// If an audio clip is less than this length, we'll ignore it.
 pub const MIN_AUDIO_THRESHOLD_MS: u32 = 500;
 
+pub const AUTO_TRANSCRIPTION_PERIOD_MS: usize = 5000;
+
+pub const AUTO_TRANSCRIPTION_PERIOD_SAMPLES: usize =
+    WHISPER_SAMPLES_PER_MILLISECOND * AUTO_TRANSCRIPTION_PERIOD_MS;
+
 /// Number of audio buffers to allocate.  This should equal
 /// the number of speaking participants we expect to have
 /// in a room at a time.
