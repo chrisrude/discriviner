@@ -132,7 +132,7 @@ impl AudioBuffer {
         let (slice_0, slice_1) = self.buffer.as_slices();
         assert!(slice_1.is_empty());
 
-        let buffer_len_bytes = slice_0.len() * std::mem::size_of::<WhisperAudioSample>();
+        let buffer_len_bytes = std::mem::size_of_val(slice_0);
         let byte_data =
             unsafe { std::slice::from_raw_parts(slice_0.as_ptr() as *const u8, buffer_len_bytes) };
 
