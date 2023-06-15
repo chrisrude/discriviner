@@ -1,6 +1,5 @@
 use std::{path::Path, sync::Arc, time::Duration};
 
-use tokio::task::JoinHandle;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext};
 
 use crate::{
@@ -13,18 +12,12 @@ use super::types::{
 };
 
 pub(crate) struct Whisper {
-    rx_transcription_requests: tokio::sync::mpsc::UnboundedReceiver<TranscriptionRequest>,
-    shutdown_token: tokio_util::sync::CancellationToken,
     whisper_context: Arc<WhisperContext>,
 }
 
 impl Whisper {
     /// Load a model from the given path
-    pub fn load_and_monitor(
-        model_path: String,
-        rx_transcription_requests: tokio::sync::mpsc::UnboundedReceiver<TranscriptionRequest>,
-        shutdown_token: tokio_util::sync::CancellationToken,
-    ) -> JoinHandle<()> {
+    pub fn load(model_path: String) -> Self {
         let path = Path::new(model_path.as_str());
         if !path.exists() {
             panic!("Model file does not exist: {}", path.to_str().unwrap());
@@ -36,43 +29,18 @@ impl Whisper {
         let whisper_context =
             Arc::new(WhisperContext::new(model_path.as_str()).expect("failed to load model"));
 
-        let mut whisper = Self {
-            rx_transcription_requests,
-            shutdown_token,
-            whisper_context,
-        };
-
-        tokio::task::spawn(async move {
-            whisper.convert_forever().await;
-        })
+        Self { whisper_context }
     }
 
-    async fn convert_forever(&mut self) {
-        loop {
-            // select on both the shutdown token and the transcription requests
-            tokio::select! {
-                _ = self.shutdown_token.cancelled() => {
-                    // we're done;
-                    return;
-                }
-                Some(transcription_request) = self.rx_transcription_requests.recv() => {
-                    self.process_transcription_request(transcription_request).await;
-
-                }
-            }
-        }
-    }
-
-    async fn process_transcription_request(
+    pub(crate) async fn process_transcription_request(
         &self,
         TranscriptionRequest {
             audio_data,
             previous_tokens,
-            response_queue,
             start_timestamp,
             user_id,
         }: TranscriptionRequest,
-    ) {
+    ) -> TranscriptionResponse {
         let processing_start = std::time::Instant::now();
         let whisper_context_clone = self.whisper_context.clone();
         let conversion_task = tokio::task::spawn_blocking(move || {
@@ -81,15 +49,13 @@ impl Whisper {
 
         let (segments, audio_duration) = conversion_task.await.unwrap();
 
-        let response = TranscriptionResponse(api_types::TranscribedMessage {
+        TranscriptionResponse(api_types::TranscribedMessage {
             start_timestamp,
             user_id,
             segments,
             audio_duration,
             processing_time: processing_start.elapsed(),
-        });
-
-        response_queue.send(response).unwrap();
+        })
     }
 
     /// This will take a long time to run, don't call it

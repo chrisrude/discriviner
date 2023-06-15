@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -20,12 +20,12 @@ pub struct UserJoinData {
     pub joined: bool,
 }
 
-#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize)]
 pub struct TranscribedMessage {
     /// absolute time this message was received,
     /// as reported by the Discord server
     /// (NOT the local machine time)
-    pub start_timestamp: u64,
+    pub start_timestamp: SystemTime,
 
     /// Discord user id of the speaker
     pub user_id: u64,

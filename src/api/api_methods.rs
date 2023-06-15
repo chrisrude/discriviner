@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::api::api_types;
-use crate::events::audio::{DiscordAudioData, TranscriptionRequest, VoiceActivityData};
+use crate::events::audio::{DiscordAudioData, VoiceActivityData};
 use crate::model::{types, voice_activity, whisper};
 use crate::packet_handler;
 
@@ -16,7 +16,6 @@ pub struct Discrivener {
     audio_buffer_manager_task: Option<JoinHandle<()>>,
     driver: songbird::Driver,
     shutdown_token: CancellationToken,
-    whisper_task: Option<JoinHandle<()>>,
     voice_activity_task: Option<JoinHandle<()>>,
 }
 
@@ -35,8 +34,6 @@ impl Discrivener {
             tokio::sync::mpsc::unbounded_channel::<api_types::VoiceChannelEvent>();
         let (tx_silent_user_events, rx_silent_user_events) =
             tokio::sync::mpsc::unbounded_channel::<u64>();
-        let (tx_transcription_requests, rx_transcription_requests) =
-            tokio::sync::mpsc::unbounded_channel::<TranscriptionRequest>();
         let (tx_voice_activity, rx_voice_activity) =
             tokio::sync::mpsc::unbounded_channel::<VoiceActivityData>();
 
@@ -48,13 +45,15 @@ impl Discrivener {
             Duration::from_millis(types::USER_SILENCE_TIMEOUT_MS),
         ));
 
+        let whisper = whisper::Whisper::load(model_path);
+
         // the audio buffer manager gets the voice data
         let audio_buffer_manager_task =
             Some(crate::model::audio_buffer::AudioBufferManager::monitor(
                 rx_audio_data,
                 rx_silent_user_events,
                 shutdown_token.clone(),
-                tx_transcription_requests,
+                whisper,
             ));
 
         let mut driver = songbird::Driver::new(config);
@@ -64,12 +63,6 @@ impl Discrivener {
             tx_audio_data,
             tx_voice_activity,
         );
-
-        let whisper_task = Some(whisper::Whisper::load_and_monitor(
-            model_path,
-            rx_transcription_requests,
-            shutdown_token.clone(),
-        ));
 
         let api_task = Some(tokio::spawn(Self::start_api_task(
             rx_api_events,
@@ -82,7 +75,6 @@ impl Discrivener {
             driver,
             shutdown_token,
             voice_activity_task,
-            whisper_task,
         }
     }
 
@@ -118,7 +110,6 @@ impl Discrivener {
             .await
             .unwrap();
         self.voice_activity_task.take().unwrap().await.unwrap();
-        self.whisper_task.take().unwrap().await.unwrap();
     }
 
     async fn start_api_task(

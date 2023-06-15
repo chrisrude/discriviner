@@ -1,8 +1,10 @@
 use std::{
     collections::{HashMap, VecDeque},
-    time::Duration,
+    sync::Arc,
+    time::{Duration, SystemTime},
 };
 
+use bytes::Bytes;
 use futures::{stream::FuturesUnordered, TryStreamExt};
 use tokio::{
     sync,
@@ -15,20 +17,32 @@ use crate::{
     model::types::WHISPER_SAMPLES_PER_MILLISECOND,
 };
 
-use super::types::{
-    self, DiscordRtcTimestamp, DiscordRtcTimestampInner, UserId, WhisperAudioSample, WhisperToken,
+use super::{
+    types::{
+        self, DiscordRtcTimestamp, DiscordRtcTimestampInner, UserId, WhisperAudioSample,
+        WhisperToken,
+    },
+    whisper::Whisper,
 };
 
 pub struct AudioBuffer {
     /// Audio data lives here.
     pub buffer: std::collections::VecDeque<WhisperAudioSample>,
 
-    /// The timestamp of the first sample in the buffer.
+    /// A tuple of timestamps
+    ///
+    /// 1. The timestamp of the first sample in the buffer.
     /// Taken from the RTC packet.
     /// The RTC timestamp typically uses an 8khz clock.
     /// So a 20ms buffer would have a timestamp increment
     /// of 160 from the previous buffer.
-    pub head_timestamp: Option<DiscordRtcTimestamp>,
+    ///
+    /// 2. timestamp of the first sample in the buffer, taken
+    // from our local clock.  We need this because the RTC
+    // timestamps are stream-specific, and cannot be compared
+    // across users.  Having a local timestamp lets our caller
+    // order messages between users.
+    pub head_timestamp: Option<(DiscordRtcTimestamp, SystemTime)>,
 
     /// The most recent tokens we've seen from this
     /// user.  Used to help inform the decoder.
@@ -64,26 +78,33 @@ impl AudioBuffer {
     ) -> Option<TranscriptionRequest> {
         let original_buffer_len = self.buffer.len();
         if self.head_timestamp.is_none() {
-            self.head_timestamp = Some(timestamp);
+            self.head_timestamp = Some((timestamp, SystemTime::now()));
         }
-        let offset = Self::rtc_timestamp_delta_to_whisper_audio_delta(
-            self.head_timestamp.unwrap(),
+        let start_idx = Self::rtc_timestamp_delta_to_whisper_audio_sample_delta(
+            self.head_timestamp.unwrap().0,
             timestamp,
         );
-        let end = offset + discord_audio.len() / types::BITRATE_CONVERSION_RATIO;
-        if end > original_buffer_len {
+        let end_idx = start_idx + discord_audio.len() / types::BITRATE_CONVERSION_RATIO;
+        if end_idx > original_buffer_len {
             // todo: drop audio instead of panicking?
             panic!("buffer overflow");
         }
 
-        if original_buffer_len > offset {
+        if original_buffer_len > end_idx {
             // todo: handle more gracefully?  Can songbird send us
             // packets out of order?
+            // the problem with sticking this audio into its place in the
+            // buffer is that a transcription might already be running on
+            // the current buffer.  So if we're copying the data in at the
+            // same time, we might get some weirdness.
             panic!("received out-of-order packet")
         }
 
-        if original_buffer_len < offset {
-            let num_samples_to_insert = offset - original_buffer_len;
+        if original_buffer_len < start_idx {
+            // we have a gap in the audio.  Pad with silence.
+            // This is expected, as Discord will omit sending packets of silence.
+
+            let num_samples_to_insert = start_idx - original_buffer_len;
             eprintln!(
                 "skip in audio, padding with silence for {} ms",
                 num_samples_to_insert / WHISPER_SAMPLES_PER_MILLISECOND
@@ -97,8 +118,8 @@ impl AudioBuffer {
 
         // if we've gone from one multiple of 5 seconds to the next, kick
         // off a transcription request.
-        if original_buffer_len / types::WHISPER_SAMPLES_PER_SECOND
-            != self.buffer.len() / types::WHISPER_SAMPLES_PER_SECOND
+        if original_buffer_len / types::AUTO_TRANSCRIPTION_PERIOD_SAMPLES
+            != self.buffer.len() / types::AUTO_TRANSCRIPTION_PERIOD_SAMPLES
         {
             // kick off a transcription request
             return Some(self.create_transcription_request());
@@ -107,11 +128,23 @@ impl AudioBuffer {
     }
 
     fn create_transcription_request(&self) -> TranscriptionRequest {
-        // todo
-        todo!()
+        // take entire contents of self.buffer and convert it into a Bytes instance
+        let (slice_0, slice_1) = self.buffer.as_slices();
+        assert!(slice_1.is_empty());
+
+        let buffer_len_bytes = slice_0.len() * std::mem::size_of::<WhisperAudioSample>();
+        let byte_data =
+            unsafe { std::slice::from_raw_parts(slice_0.as_ptr() as *const u8, buffer_len_bytes) };
+
+        TranscriptionRequest {
+            audio_data: Bytes::from(byte_data),
+            previous_tokens: Vec::from(self.last_tokens.clone()),
+            start_timestamp: self.head_timestamp.unwrap().1,
+            user_id: self.user_id.unwrap(),
+        }
     }
 
-    fn rtc_timestamp_delta_to_whisper_audio_delta(
+    fn rtc_timestamp_delta_to_whisper_audio_sample_delta(
         ts1: DiscordRtcTimestamp,
         ts2: DiscordRtcTimestamp,
     ) -> usize {
@@ -184,10 +217,6 @@ pub(crate) struct AudioBufferManager {
     // discarded, they will be returned to reserve_buffers.
     active_buffers: HashMap<types::UserId, AudioBuffer>,
 
-    // this is a list of all of the transcription requests which
-    // we've sent to Whisper, but which have not yet returned.
-    pending_transcription_requests: FuturesUnordered<JoinHandle<TranscriptionResponse>>,
-
     // these are buffers which we've pre-allocated, but which are
     // not currently in use.  We'll keep them around so that we
     // can quickly assign them to a user when they start talking.
@@ -204,10 +233,6 @@ pub(crate) struct AudioBufferManager {
 
     // this is used to signal the audio buffer manager to shut down.
     shutdown_token: CancellationToken,
-
-    // this is used to send transcription requests to Whisper, and
-    // to receive the results.
-    tx_transcription_requests: sync::mpsc::UnboundedSender<TranscriptionRequest>,
 }
 
 impl<'a> AudioBufferManager {
@@ -215,15 +240,13 @@ impl<'a> AudioBufferManager {
         rx_audio_data: sync::mpsc::UnboundedReceiver<DiscordAudioData>,
         rx_silent_user_events: sync::mpsc::UnboundedReceiver<types::UserId>,
         shutdown_token: CancellationToken,
-        tx_transcription_requests: sync::mpsc::UnboundedSender<TranscriptionRequest>,
+        whisper: Whisper,
     ) -> task::JoinHandle<()> {
         let mut audio_buffer_manager = AudioBufferManager {
             active_buffers: HashMap::new(),
-            pending_transcription_requests: FuturesUnordered::new(),
             reserve_buffers: VecDeque::new(),
             rx_audio_data,
             rx_silent_user_events,
-            tx_transcription_requests,
             shutdown_token,
         };
         // pre-allocate some buffers
@@ -233,7 +256,7 @@ impl<'a> AudioBufferManager {
                 .push_back(AudioBuffer::new());
         }
         task::spawn(async move {
-            audio_buffer_manager.loop_forever().await;
+            audio_buffer_manager.loop_forever(whisper).await;
         })
     }
 
@@ -254,7 +277,11 @@ impl<'a> AudioBufferManager {
         (yield_fn)(buffer);
     }
 
-    async fn loop_forever(&mut self) {
+    async fn loop_forever(&mut self, whisper_raw: Whisper) {
+        let whisper = Arc::new(whisper_raw);
+        let mut pending_transcription_requests =
+            FuturesUnordered::<JoinHandle<TranscriptionResponse>>::new();
+
         loop {
             tokio::select! {
                 _ = self.shutdown_token.cancelled() => {
@@ -269,14 +296,16 @@ impl<'a> AudioBufferManager {
                 ) = self.rx_audio_data.recv() => {
                     self.with_buffer_for_user(user_id, |buffer| {
                         // might produce a transcription request
-                        if let Some(transcription_request) = buffer.add_audio(timestamp, &discord_audio) {
-                            let request = self.tx_transcription_requests.send(transcription_request);
-                            // todo: create oneshot
-                            self.pending_transcription_requests.push(request);
+                        if let Some(request) = buffer.add_audio(timestamp, &discord_audio) {
+                            let whisper_clone = whisper.clone();
+                            let join_handle = tokio::spawn(async move {
+                                whisper_clone.process_transcription_request(request).await
+                            });
+                            pending_transcription_requests.push(join_handle);
                         }
                     });
                 }
-                Ok(Some(transcription_response)) = self.pending_transcription_requests.try_next() => {
+                Ok(Some(transcription_response)) = pending_transcription_requests.try_next() => {
                     let user_id = transcription_response.0.user_id;
                     self.with_buffer_for_user(user_id, |buffer| {
                         buffer.handle_transcription_response(&transcription_response);

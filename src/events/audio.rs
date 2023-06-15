@@ -2,6 +2,8 @@
 // divided into 20ms chunks.  But write this more generally just in case
 // that changes.
 
+use std::time::SystemTime;
+
 use crate::model::types::{self, DiscordAudioSample, DiscordRtcTimestamp, UserId};
 
 #[derive(Debug)]
@@ -22,8 +24,7 @@ pub struct VoiceActivityData {
 pub(crate) struct TranscriptionRequest {
     pub audio_data: bytes::Bytes,
     pub previous_tokens: Vec<types::WhisperToken>,
-    pub response_queue: tokio::sync::oneshot::Sender<TranscriptionResponse>,
-    pub start_timestamp: u64,
+    pub start_timestamp: SystemTime,
     pub user_id: UserId,
 }
 
