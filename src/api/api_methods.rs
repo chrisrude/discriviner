@@ -1,7 +1,6 @@
-use std::time::Duration;
-
 use crate::api::api_types;
 use crate::events::audio::{DiscordAudioData, VoiceActivityData};
+use crate::model::audio_manager::AudioManager;
 use crate::model::{types, voice_activity, whisper};
 use crate::packet_handler;
 
@@ -42,19 +41,19 @@ impl Discrivener {
             shutdown_token.clone(),
             tx_api_events.clone(),
             tx_silent_user_events,
-            Duration::from_millis(types::USER_SILENCE_TIMEOUT_MS),
+            types::USER_SILENCE_TIMEOUT,
         ));
 
         let whisper = whisper::Whisper::load(model_path);
 
         // the audio buffer manager gets the voice data
-        let audio_buffer_manager_task =
-            Some(crate::model::audio_buffer::AudioBufferManager::monitor(
-                rx_audio_data,
-                rx_silent_user_events,
-                shutdown_token.clone(),
-                whisper,
-            ));
+        let audio_buffer_manager_task = Some(AudioManager::monitor(
+            rx_audio_data,
+            rx_silent_user_events,
+            shutdown_token.clone(),
+            tx_api_events.clone(),
+            whisper,
+        ));
 
         let mut driver = songbird::Driver::new(config);
         packet_handler::PacketHandler::register(

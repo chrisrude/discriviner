@@ -232,3 +232,71 @@ impl TextSegment {
         text
     }
 }
+
+impl TranscribedMessage {
+    /// Splits the TranscribedMessage into two separate messages.
+    /// The first message will contain all segments that end before the given end_time.
+    /// The second message will contain all segments that end at or after the given end_time.
+    ///
+    /// If there are no segments that end before the given end_time, the first message
+    /// will be None.  If there aer no segments that end after the given end_time,
+    /// the second message will be None.
+    ///
+    /// If there are no segments in the provided message at all, both messages will be None.
+    pub(crate) fn split_at_end_time(
+        message: &TranscribedMessage,
+        end_time: SystemTime,
+    ) -> (Option<Self>, Option<Self>) {
+        let fn_first_half = |segment: &TextSegment| {
+            message.start_timestamp + Duration::from_millis(segment.end_offset_ms as u64)
+                <= end_time
+        };
+        let mut first_segments = vec![];
+        let mut second_segments = vec![];
+        for segment in message.segments.iter() {
+            if fn_first_half(&segment) {
+                first_segments.push(segment.clone());
+            } else {
+                second_segments.push(segment.clone());
+            }
+        }
+        let (first, first_duration) = if first_segments.is_empty() {
+            (None, Duration::ZERO)
+        } else {
+            let duration = first_segments
+                .iter()
+                .map(|segment| Duration::from_millis(segment.end_offset_ms as u64))
+                .max()
+                .unwrap();
+            (
+                Some(Self {
+                    segments: first_segments,
+                    start_timestamp: message.start_timestamp,
+                    user_id: message.user_id,
+                    audio_duration: duration,
+                    processing_time: message.processing_time,
+                }),
+                duration,
+            )
+        };
+        let second = if second_segments.is_empty() {
+            None
+        } else {
+            // for all the second segments, remove the amount of time chopped
+            // off the beginning of the message
+            for segment in &mut second_segments {
+                segment.start_offset_ms -= first_duration.as_millis() as u32;
+                segment.end_offset_ms -= first_duration.as_millis() as u32;
+            }
+            Some(Self {
+                segments: second_segments,
+                start_timestamp: message.start_timestamp + first_duration,
+                user_id: message.user_id,
+                audio_duration: message.audio_duration - first_duration,
+                processing_time: Duration::from_millis(1),
+            })
+        };
+
+        (first, second)
+    }
+}

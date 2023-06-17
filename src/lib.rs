@@ -6,8 +6,10 @@ mod events {
     pub(crate) mod audio;
 }
 mod model {
-    pub(crate) mod audio_buffer;
+    pub(crate) mod audio_manager;
+    pub(crate) mod audio_slice;
     pub(crate) mod types;
+    pub(crate) mod user_audio;
     pub(crate) mod voice_activity;
     pub(crate) mod whisper;
 }
