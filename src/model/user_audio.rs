@@ -117,3 +117,36 @@ impl UserAudio {
             .into_iter()
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    use std::num::Wrapping;
+
+    use super::*;
+
+    #[test]
+    fn test_add_audio() {
+        let mut user_audio = UserAudio::new(123);
+        let timestamp = Wrapping(1234);
+        let audio = vec![2; 960];
+        user_audio.add_audio(timestamp, &audio);
+        // non empty slices
+        let non_empty = user_audio
+            .slices
+            .iter()
+            .filter(|s| !s.start_time.is_none())
+            .count();
+        assert_eq!(non_empty, 1);
+        assert_eq!(user_audio.slices[0].audio.len(), 960 / (2 * 3));
+
+        user_audio.add_audio(Wrapping(1001234), &audio);
+        let non_empty_2 = user_audio
+            .slices
+            .iter()
+            .filter(|s| !s.start_time.is_none())
+            .count();
+        assert_eq!(non_empty_2, 2);
+        assert_eq!(user_audio.slices[1].audio.len(), 960 / (2 * 3));
+    }
+}
