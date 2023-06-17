@@ -128,6 +128,8 @@ impl<'a> AudioManager {
                         )
                     });
                 }
+                // todo: also handle a user stops speaking (but no timeout)
+                //       event here
                 Some(user_id) = self.rx_silent_user_events.recv() => {
                     // this user has stopped talking for long enough, see if
                     // we have any audio left to finalize

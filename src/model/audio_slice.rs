@@ -58,7 +58,7 @@ pub(crate) struct AudioSlice {
     pub finalized: bool,
     pub last_request: Option<Duration>,
     pub start_time: Option<(DiscordRtcTimestamp, SystemTime)>,
-    pub tentative_transcription: Option<Transcription>,
+    pub tentative_transcription: Option<(Duration, Option<Transcription>)>,
 }
 
 impl AudioSlice {
@@ -73,6 +73,7 @@ impl AudioSlice {
     }
 
     pub fn clear(&mut self) {
+        eprintln!("clearing audio slice");
         self.audio.clear();
         self.finalized = false;
         self.last_request = None;
@@ -214,6 +215,7 @@ impl AudioSlice {
             };
 
             let duration = self.buffer_duration();
+            eprintln!("requesting transcription for {} ms", duration.as_millis());
             self.last_request = Some(duration);
             return Some((Bytes::from(byte_data), duration, start_time));
         }
@@ -226,6 +228,12 @@ impl AudioSlice {
     /// timestamps are adjusted accordingly.
     pub fn discard_audio(&mut self, duration: &Duration) {
         let discard_idx = duration.as_millis() as usize * WHISPER_SAMPLES_PER_MILLISECOND;
+
+        eprintln!(
+            "discarding {} ms of audio from {} ms buffer",
+            duration.as_millis(),
+            self.buffer_duration().as_millis()
+        );
 
         if discard_idx > self.audio.len() {
             // discard more than we have, so just clear the buffer
@@ -253,10 +261,34 @@ impl AudioSlice {
     pub fn finalize(&mut self) -> Option<Transcription> {
         self.finalized = true;
 
+        eprintln!(
+            "finalizing slice with {} ms of audio",
+            self.buffer_duration().as_millis()
+        );
+
+        if self.tentative_transcription.is_none() {
+            // if we don't have a tentative transcription, then
+            // we can't return anything
+            return None;
+        }
+
+        let (duration, mut transcription_opt) = self.tentative_transcription.take().unwrap();
+
+        eprintln!(
+            "tentative description has {} segments",
+            transcription_opt
+                .as_ref()
+                .map(|x| x.segments.len())
+                .unwrap_or(0)
+        );
+
         // if we had a tentative transcription, return it.
         // We know that it's current, since if we had gathered
         // more audio, we would have discarded it.
-        self.tentative_transcription.take()
+        assert!(duration == self.buffer_duration());
+        self.clear();
+
+        transcription_opt.take()
     }
 
     pub fn buffer_duration(&self) -> Duration {
@@ -282,11 +314,36 @@ impl AudioSlice {
         // but only if we haven't seen new audio since the response was generated.
 
         if let Some(end_time) = self.finalize_timestamp() {
-            let (finalized_opt, mut tentative_opt) =
+            let (finalized_opt, tentative_opt) =
                 Transcription::split_at_end_time(message, end_time);
             if self.finalized {
                 assert!(tentative_opt.is_none());
             }
+
+            eprintln!(
+                "have transcription: {} final segments, {} tentative segments",
+                finalized_opt
+                    .as_ref()
+                    .map(|x| x.segments.len())
+                    .unwrap_or(0),
+                tentative_opt
+                    .as_ref()
+                    .map(|x| x.segments.len())
+                    .unwrap_or(0)
+            );
+
+            // if the current buffer duration matches the
+            // duration in the passed-in transcription, then
+            // store whatever we have as tentative.  We can't
+            // look at the tentative transcription, since it
+            // will be None if it contains no words.
+            //
+            // only store the tentative transcription if it covers
+            // all the audio currently in the buffer
+            if self.buffer_duration() == message.audio_duration {
+                self.tentative_transcription = Some((message.audio_duration, tentative_opt));
+            }
+
             // with our finalized transcription, we can now discard
             // the audio that was used to generate it.  Be sure to
             // only discard exactly as much audio as was represented
@@ -294,15 +351,6 @@ impl AudioSlice {
             if let Some(finalized) = finalized_opt.clone() {
                 self.discard_audio(&finalized.audio_duration);
             }
-
-            // only store the tentative transcription if it covers
-            // all the audio currently in the buffer
-            if let Some(tentative) = tentative_opt.clone() {
-                if self.buffer_duration() != tentative.audio_duration {
-                    tentative_opt = None;
-                }
-            }
-            self.tentative_transcription = tentative_opt;
 
             finalized_opt
         } else {
