@@ -128,7 +128,10 @@ impl AudioSlice {
         // since more audio has come in, discard the tentative transcription
         self.tentative_transcription = None;
 
+        eprintln!("audio len is {}", self.audio.len());
+        eprintln!("adding {} samples to audio buffer", discord_audio.len());
         self.resample_audio_from_discord_to_whisper(discord_audio);
+        eprintln!("len is now {}", self.audio.len());
 
         // update the last slice to point to the end of the buffer
     }
@@ -216,7 +219,7 @@ impl AudioSlice {
         // update the start timestamp
         if let Some((start_rtc, start_system)) = self.start_time {
             self.start_time = Some((
-                start_rtc + duration_to_rtc(duration),
+                start_rtc - duration_to_rtc(duration),
                 start_system + *duration,
             ));
         }
@@ -285,5 +288,89 @@ impl AudioSlice {
         } else {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::model::types::DISCORD_SAMPLES_PER_SECOND;
+
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn test_discard_audio() {
+        let mut slice = AudioSlice::new();
+        slice.start_time = Some((
+            Wrapping(1000 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32),
+            SystemTime::now(),
+        ));
+        slice.audio = vec![0.0; 1000 * WHISPER_SAMPLES_PER_MILLISECOND];
+        assert_eq!(slice.buffer_duration(), Duration::from_millis(1000));
+
+        slice.discard_audio(&Duration::from_millis(500));
+
+        assert_eq!(slice.buffer_duration(), Duration::from_millis(500));
+        assert_eq!(slice.audio.len(), 500 * WHISPER_SAMPLES_PER_MILLISECOND);
+        let time = slice.start_time.unwrap().0;
+        assert_eq!(time.0, 500 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32);
+    }
+
+    const DISCORD_SAMPLES_PER_MILLISECOND: usize = DISCORD_SAMPLES_PER_SECOND / 1000;
+    #[test]
+    fn test_add_audio() {
+        let mut slice = AudioSlice::new();
+        slice.start_time = Some((
+            Wrapping(1000 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32),
+            SystemTime::now(),
+        ));
+        slice.audio = vec![0.0; 1000 * WHISPER_SAMPLES_PER_MILLISECOND];
+        assert_eq!(slice.buffer_duration(), Duration::from_millis(1000));
+
+        slice.add_audio(
+            Wrapping(2000 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32),
+            &vec![1; 500 * DISCORD_SAMPLES_PER_MILLISECOND * DISCORD_AUDIO_CHANNELS],
+        );
+
+        assert_eq!(slice.buffer_duration(), Duration::from_millis(1500));
+        assert_eq!(slice.audio.len(), 1500 * WHISPER_SAMPLES_PER_MILLISECOND);
+        let time = slice.start_time.unwrap().0;
+        assert_eq!(time.0, 1000 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32);
+
+        slice.add_audio(
+            Wrapping(4000 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32),
+            &vec![1; 500 * DISCORD_SAMPLES_PER_MILLISECOND * DISCORD_AUDIO_CHANNELS],
+        );
+
+        assert_eq!(slice.buffer_duration(), Duration::from_millis(3500));
+        assert_eq!(slice.audio.len(), 3500 * WHISPER_SAMPLES_PER_MILLISECOND);
+        let time = slice.start_time.unwrap().0;
+        assert_eq!(time.0, 1000 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32);
+
+        // don't add audio that's too far in the future
+        slice.add_audio(
+            Wrapping(8000 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32),
+            &vec![1; 500 * DISCORD_SAMPLES_PER_MILLISECOND * DISCORD_AUDIO_CHANNELS],
+        );
+
+        assert_eq!(slice.buffer_duration(), Duration::from_millis(3500));
+        assert_eq!(slice.audio.len(), 3500 * WHISPER_SAMPLES_PER_MILLISECOND);
+        let time = slice.start_time.unwrap().0;
+        assert_eq!(time.0, 1000 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32);
+
+        assert!(
+            slice.fits_within_this_slice(Wrapping(1000 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32))
+        );
+
+        assert!(
+            !slice.fits_within_this_slice(Wrapping(999 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32))
+        );
+
+        assert!(
+            slice.fits_within_this_slice(Wrapping(6499 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32))
+        );
+
+        assert!(!slice
+            .fits_within_this_slice(Wrapping(6500 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32)));
     }
 }

@@ -4,7 +4,7 @@
 use std::{num::Wrapping, time::Duration};
 
 pub const DISCORD_AUDIO_CHANNELS: usize = 2;
-const DISCORD_SAMPLES_PER_SECOND: usize = 48000;
+pub const DISCORD_SAMPLES_PER_SECOND: usize = 48000;
 
 const WHISPER_SAMPLES_PER_SECOND: usize = 16000;
 pub const WHISPER_SAMPLES_PER_MILLISECOND: usize = WHISPER_SAMPLES_PER_SECOND / 1000;
