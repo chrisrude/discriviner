@@ -266,11 +266,7 @@ impl AudioSlice {
             self.buffer_duration().as_millis()
         );
 
-        if self.tentative_transcription.is_none() {
-            // if we don't have a tentative transcription, then
-            // we can't return anything
-            return None;
-        }
+        self.tentative_transcription.as_ref()?;
 
         let (duration, mut transcription_opt) = self.tentative_transcription.take().unwrap();
 
