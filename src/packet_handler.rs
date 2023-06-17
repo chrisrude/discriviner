@@ -12,16 +12,19 @@ use songbird::EventContext;
 use std::sync::RwLock;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::api::api_types;
 use crate::events::audio::DiscordAudioData;
 use crate::events::audio::VoiceActivityData;
 use crate::model::types;
+use crate::model::types::ConnectData;
+use crate::model::types::DisconnectData;
 use crate::model::types::DiscordAudioSample;
 use crate::model::types::DiscordRtcTimestamp;
+use crate::model::types::UserJoinData;
+use crate::model::types::VoiceChannelEvent;
 
 pub(crate) struct PacketHandler {
     ssrc_to_user_id: RwLock<std::collections::HashMap<types::Ssrc, types::UserId>>,
-    tx_api_events: UnboundedSender<api_types::VoiceChannelEvent>,
+    tx_api_events: UnboundedSender<VoiceChannelEvent>,
     tx_audio_data: UnboundedSender<DiscordAudioData>,
     tx_voice_activity: UnboundedSender<VoiceActivityData>,
 }
@@ -29,7 +32,7 @@ pub(crate) struct PacketHandler {
 impl PacketHandler {
     pub(crate) fn register(
         driver: &mut songbird::Driver,
-        tx_api_events: UnboundedSender<api_types::VoiceChannelEvent>,
+        tx_api_events: UnboundedSender<VoiceChannelEvent>,
         tx_audio_data: UnboundedSender<DiscordAudioData>,
         tx_voice_activity: UnboundedSender<VoiceActivityData>,
     ) {
@@ -48,12 +51,10 @@ impl PacketHandler {
             self.ssrc_to_user_id.write().unwrap().insert(ssrc, user_id);
         }
         self.tx_api_events
-            .send(api_types::VoiceChannelEvent::UserJoin(
-                api_types::UserJoinData {
-                    user_id,
-                    joined: true,
-                },
-            ))
+            .send(VoiceChannelEvent::UserJoin(UserJoinData {
+                user_id,
+                joined: true,
+            }))
             .unwrap();
     }
 
@@ -109,12 +110,10 @@ impl PacketHandler {
         // for this user after they leave, so we don't want to
         // remove them from the map just yet.
         self.tx_api_events
-            .send(api_types::VoiceChannelEvent::UserJoin(
-                api_types::UserJoinData {
-                    user_id,
-                    joined: false,
-                },
-            ))
+            .send(VoiceChannelEvent::UserJoin(UserJoinData {
+                user_id,
+                joined: false,
+            }))
             .unwrap();
     }
 
@@ -232,9 +231,7 @@ pub(crate) fn register_events(raw_handler: PacketHandler, driver: &mut songbird:
                 if let EventContext::DriverConnect(connect_data) = ctx {
                     my_handler
                         .tx_api_events
-                        .send(api_types::VoiceChannelEvent::Connect(
-                            api_types::ConnectData::from(connect_data),
-                        ))
+                        .send(VoiceChannelEvent::Connect(ConnectData::from(connect_data)))
                         .unwrap();
                 }
             },
@@ -248,9 +245,9 @@ pub(crate) fn register_events(raw_handler: PacketHandler, driver: &mut songbird:
                 if let EventContext::DriverDisconnect(disconnect_data) = ctx {
                     my_handler
                         .tx_api_events
-                        .send(api_types::VoiceChannelEvent::Disconnect(
-                            api_types::DisconnectData::from(disconnect_data),
-                        ))
+                        .send(VoiceChannelEvent::Disconnect(DisconnectData::from(
+                            disconnect_data,
+                        )))
                         .unwrap();
                 }
             },
@@ -264,9 +261,9 @@ pub(crate) fn register_events(raw_handler: PacketHandler, driver: &mut songbird:
                 if let EventContext::DriverReconnect(connect_data) = ctx {
                     my_handler
                         .tx_api_events
-                        .send(api_types::VoiceChannelEvent::Reconnect(
-                            api_types::ConnectData::from(connect_data),
-                        ))
+                        .send(VoiceChannelEvent::Reconnect(ConnectData::from(
+                            connect_data,
+                        )))
                         .unwrap();
                 }
             },

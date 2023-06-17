@@ -6,14 +6,37 @@ use std::{
 
 use bytes::Bytes;
 
-use crate::{api::api_types::TranscribedMessage, model::types::WHISPER_SAMPLES_PER_MILLISECOND};
-
-use super::types::{
-    self, DiscordAudioSample, DiscordRtcTimestamp, DiscordRtcTimestampInner, WhisperAudioSample,
-    AUTO_TRANSCRIPTION_PERIOD, BITRATE_CONVERSION_RATIO, DISCORD_AUDIO_CHANNELS,
-    DISCORD_AUDIO_MAX_VALUE_TWO_SAMPLES, RTC_CLOCK_SAMPLES_PER_MILLISECOND, USER_SILENCE_TIMEOUT,
-    USER_SILENCE_TIMEOUT_LOOSE, WHISPER_AUDIO_BUFFER_SIZE,
+use super::{
+    constants::{
+        AUDIO_TO_RECORD_SECONDS, AUTO_TRANSCRIPTION_PERIOD_MS, USER_SILENCE_TIMEOUT,
+        USER_SILENCE_TIMEOUT_LOOSE,
+    },
+    types::{
+        self, DiscordAudioSample, DiscordRtcTimestamp, DiscordRtcTimestampInner,
+        TranscribedMessage, WhisperAudioSample,
+    },
 };
+
+const DISCORD_AUDIO_CHANNELS: usize = 2;
+const DISCORD_SAMPLES_PER_SECOND: usize = 48000;
+
+const WHISPER_SAMPLES_PER_SECOND: usize = 16000;
+const WHISPER_SAMPLES_PER_MILLISECOND: usize = 16;
+
+// The RTC timestamp uses an 8khz clock.
+const RTC_CLOCK_SAMPLES_PER_MILLISECOND: u128 = 8;
+
+// being a whole number. If this is not the case, we'll need to
+// do some more complicated resampling.
+const BITRATE_CONVERSION_RATIO: usize = DISCORD_SAMPLES_PER_SECOND / WHISPER_SAMPLES_PER_SECOND;
+
+// the total size of the buffer we'll use to store audio, in samples
+const WHISPER_AUDIO_BUFFER_SIZE: usize = WHISPER_SAMPLES_PER_SECOND * AUDIO_TO_RECORD_SECONDS;
+
+const DISCORD_AUDIO_MAX_VALUE: WhisperAudioSample = DiscordAudioSample::MAX as WhisperAudioSample;
+
+pub(crate) const DISCORD_AUDIO_MAX_VALUE_TWO_SAMPLES: WhisperAudioSample =
+    DISCORD_AUDIO_MAX_VALUE * DISCORD_AUDIO_CHANNELS as WhisperAudioSample;
 
 fn duration_to_rtc(duration: &Duration) -> DiscordRtcTimestamp {
     let rtc_samples = duration.as_millis() * RTC_CLOCK_SAMPLES_PER_MILLISECOND;
@@ -163,7 +186,7 @@ impl AudioSlice {
                 // we don't need to request again
                 return false;
             }
-            last_period = last.as_millis() / AUTO_TRANSCRIPTION_PERIOD.as_millis();
+            last_period = last.as_millis() / AUTO_TRANSCRIPTION_PERIOD_MS;
         } else {
             last_period = 0;
         }
@@ -174,28 +197,25 @@ impl AudioSlice {
             return true;
         }
 
-        let current_period =
-            self.buffer_duration().as_millis() / AUTO_TRANSCRIPTION_PERIOD.as_millis();
+        let current_period = self.buffer_duration().as_millis() / AUTO_TRANSCRIPTION_PERIOD_MS;
 
         last_period != current_period
     }
 
-    pub fn make_transcription_request(&mut self) -> Option<(Bytes, SystemTime)> {
+    pub fn make_transcription_request(&mut self) -> Option<(Bytes, Duration, SystemTime)> {
         if !self.is_ready_for_transcription() {
             return None;
         }
         if let Some((_, start_time)) = self.start_time {
-            let now = SystemTime::now();
-            let duration = now.duration_since(start_time).unwrap();
-
             let buffer = self.audio.as_slice();
             let buffer_len_bytes = std::mem::size_of_val(buffer);
             let byte_data = unsafe {
                 std::slice::from_raw_parts(buffer.as_ptr() as *const u8, buffer_len_bytes)
             };
 
+            let duration = self.buffer_duration();
             self.last_request = Some(duration);
-            return Some((Bytes::from(byte_data), start_time));
+            return Some((Bytes::from(byte_data), duration, start_time));
         }
         None
     }
@@ -293,8 +313,6 @@ impl AudioSlice {
 
 #[cfg(test)]
 mod tests {
-    use crate::model::types::DISCORD_SAMPLES_PER_SECOND;
-
     use super::*;
     use std::time::Duration;
 

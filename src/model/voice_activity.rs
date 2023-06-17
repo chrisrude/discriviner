@@ -1,4 +1,3 @@
-use crate::api::api_types::VoiceChannelEvent;
 use crate::events::audio::VoiceActivityData;
 use crate::model::types::UserId;
 use std::collections;
@@ -9,6 +8,8 @@ use tokio::time;
 use tokio::time::Duration;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
+
+use super::types::VoiceChannelEvent;
 
 pub(crate) struct VoiceActivity {
     last_time_by_user: collections::HashMap<UserId, (bool, time::Instant)>,

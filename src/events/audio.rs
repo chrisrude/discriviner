@@ -2,9 +2,11 @@
 // divided into 20ms chunks.  But write this more generally just in case
 // that changes.
 
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
-use crate::model::types::{self, DiscordAudioSample, DiscordRtcTimestamp, UserId};
+use whisper_rs::WhisperToken;
+
+use crate::model::types::{DiscordAudioSample, DiscordRtcTimestamp, TranscribedMessage, UserId};
 
 #[derive(Debug)]
 pub(crate) struct DiscordAudioData {
@@ -23,10 +25,11 @@ pub struct VoiceActivityData {
 #[derive(Debug)]
 pub(crate) struct TranscriptionRequest {
     pub audio_data: bytes::Bytes,
-    pub previous_tokens: Vec<types::WhisperToken>,
+    pub audio_duration: Duration,
+    pub previous_tokens: Vec<WhisperToken>,
     pub start_timestamp: SystemTime,
     pub user_id: UserId,
 }
 
 #[derive(Debug)]
-pub(crate) struct TranscriptionResponse(pub crate::api::api_types::TranscribedMessage);
+pub(crate) struct TranscriptionResponse(pub TranscribedMessage);

@@ -1,10 +1,13 @@
 use std::collections::VecDeque;
 
-use crate::{api::api_types::TranscribedMessage, events::audio::TranscriptionRequest};
+use whisper_rs::WhisperToken;
+
+use crate::events::audio::TranscriptionRequest;
 
 use super::{
     audio_slice::AudioSlice,
-    types::{self, DiscordRtcTimestamp, UserId, WhisperToken},
+    constants::TOKENS_TO_KEEP,
+    types::{DiscordAudioSample, DiscordRtcTimestamp, TranscribedMessage, UserId},
 };
 
 /// A buffer of audio data for a single user.
@@ -36,7 +39,7 @@ impl UserAudio {
     pub fn new(user_id: UserId) -> Self {
         Self {
             slices: vec![AudioSlice::new(), AudioSlice::new()],
-            last_tokens: VecDeque::with_capacity(types::TOKENS_TO_KEEP),
+            last_tokens: VecDeque::with_capacity(TOKENS_TO_KEEP),
             user_id,
         }
     }
@@ -44,7 +47,7 @@ impl UserAudio {
     pub fn add_audio(
         &mut self,
         rtc_timestamp: DiscordRtcTimestamp,
-        discord_audio: &[types::DiscordAudioSample],
+        discord_audio: &[DiscordAudioSample],
     ) {
         // find a slice that will take the audio, and add it.
         // create a new slice if necessary.
@@ -107,12 +110,15 @@ impl UserAudio {
         self.slices
             .iter_mut()
             .filter_map(|s| s.make_transcription_request())
-            .map(|(audio_data, start_timestamp)| TranscriptionRequest {
-                audio_data,
-                previous_tokens: Vec::from(self.last_tokens.clone()),
-                start_timestamp,
-                user_id: self.user_id,
-            })
+            .map(
+                |(audio_data, audio_duration, start_timestamp)| TranscriptionRequest {
+                    audio_data,
+                    audio_duration,
+                    previous_tokens: Vec::from(self.last_tokens.clone()),
+                    start_timestamp,
+                    user_id: self.user_id,
+                },
+            )
             .collect::<Vec<_>>()
             .into_iter()
     }

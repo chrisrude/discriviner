@@ -1,10 +1,11 @@
 use clap::Parser;
 use colored::Colorize;
-use discrivener::api::{self, api_types};
+use discrivener::model::types::{TranscribedMessage, VoiceChannelEvent};
+use discrivener::Discrivener;
 use std::sync::Arc;
 use tokio::signal;
 
-fn on_text(message: api_types::TranscribedMessage, log_performance: bool) {
+fn on_text(message: TranscribedMessage, log_performance: bool) {
     if message.segments.is_empty() {
         println!();
         return;
@@ -40,13 +41,11 @@ fn on_text(message: api_types::TranscribedMessage, log_performance: bool) {
 #[tokio::main]
 async fn tokio_main(cli: Cli) {
     let log_performance = cli.log_performance;
-    let mut discrivener = api::api_methods::Discrivener::load(
+    let mut discrivener = Discrivener::load(
         cli.model_path,
         Arc::new(move |event| match event {
-            api_types::VoiceChannelEvent::TranscribedMessage(message) => {
-                on_text(message, log_performance)
-            }
-            api_types::VoiceChannelEvent::Connect(status) => {
+            VoiceChannelEvent::TranscribedMessage(message) => on_text(message, log_performance),
+            VoiceChannelEvent::Connect(status) => {
                 println!(
                     "Connection status: {} to channel #{}",
                     "connected".bright_green(),
@@ -57,7 +56,7 @@ async fn tokio_main(cli: Cli) {
                     }
                 )
             }
-            api_types::VoiceChannelEvent::UserJoin(user_data) => {
+            VoiceChannelEvent::UserJoin(user_data) => {
                 println!(
                     "User {} {}",
                     user_data.user_id,
@@ -68,7 +67,7 @@ async fn tokio_main(cli: Cli) {
                     }
                 )
             }
-            api_types::VoiceChannelEvent::Reconnect(status) => {
+            VoiceChannelEvent::Reconnect(status) => {
                 println!(
                     "Connection status: {} to channel #{}",
                     "reconnected".bright_green(),
@@ -79,10 +78,10 @@ async fn tokio_main(cli: Cli) {
                     }
                 )
             }
-            api_types::VoiceChannelEvent::Disconnect(_) => {
+            VoiceChannelEvent::Disconnect(_) => {
                 println!("Connection status: {}", "disconnected".bright_red());
             }
-            api_types::VoiceChannelEvent::SilentChannel(silent) => {
+            VoiceChannelEvent::SilentChannel(silent) => {
                 if silent {
                     println!("Channel is silent");
                 } else {

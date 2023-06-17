@@ -12,13 +12,12 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    api::api_types::{self},
     events::audio::{DiscordAudioData, TranscriptionResponse},
-    model::types::DISCARD_USER_AUDIO_AFTER,
+    model::constants::DISCARD_USER_AUDIO_AFTER,
 };
 
 use super::{
-    types::{self},
+    types::{self, VoiceChannelEvent},
     user_audio::UserAudio,
     whisper::Whisper,
 };
@@ -51,7 +50,7 @@ impl<'a> AudioManager {
         rx_audio_data: sync::mpsc::UnboundedReceiver<DiscordAudioData>,
         rx_silent_user_events: sync::mpsc::UnboundedReceiver<types::UserId>,
         shutdown_token: CancellationToken,
-        tx_api: sync::mpsc::UnboundedSender<api_types::VoiceChannelEvent>,
+        tx_api: sync::mpsc::UnboundedSender<VoiceChannelEvent>,
         whisper: Whisper,
     ) -> task::JoinHandle<()> {
         let mut audio_buffer_manager = AudioManager {
@@ -105,7 +104,7 @@ impl<'a> AudioManager {
     /// data and transcription requests.
     async fn loop_forever(
         &mut self,
-        tx_api: sync::mpsc::UnboundedSender<api_types::VoiceChannelEvent>,
+        tx_api: sync::mpsc::UnboundedSender<VoiceChannelEvent>,
         whisper_raw: Whisper,
     ) {
         let whisper = Arc::new(whisper_raw);
@@ -136,7 +135,7 @@ impl<'a> AudioManager {
                         let transcripts = buffer.handle_user_silence();
                         for transcript in transcripts {
                             tx_api
-                            .send(api_types::VoiceChannelEvent::TranscribedMessage(
+                            .send(VoiceChannelEvent::TranscribedMessage(
                                 transcript,
                             ))
                             .unwrap();
@@ -155,7 +154,7 @@ impl<'a> AudioManager {
                         let message_opt = buffer.handle_transcription_response(&transcription_response.0);
                         if let Some(message) = message_opt {
                             tx_api
-                            .send(api_types::VoiceChannelEvent::TranscribedMessage(
+                            .send(VoiceChannelEvent::TranscribedMessage(
                                 message,
                             ))
                             .unwrap();

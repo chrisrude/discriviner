@@ -1,15 +1,10 @@
-use std::{path::Path, sync::Arc, time::Duration};
+use std::{path::Path, sync::Arc};
 
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext};
+use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperToken};
 
-use crate::{
-    api::api_types::{self, TokenWithProbability},
-    events::audio::{TranscriptionRequest, TranscriptionResponse},
-};
+use crate::events::audio::{TranscriptionRequest, TranscriptionResponse};
 
-use super::types::{
-    self, WhisperAudioSample, WhisperTokenProbabilityPercentage, WHISPER_SAMPLES_PER_MILLISECOND,
-};
+use super::types::{TextSegment, TokenWithProbability, TranscribedMessage, WhisperAudioSample};
 
 pub(crate) struct Whisper {
     whisper_context: Arc<WhisperContext>,
@@ -36,6 +31,7 @@ impl Whisper {
         &self,
         TranscriptionRequest {
             audio_data,
+            audio_duration,
             previous_tokens,
             start_timestamp,
             user_id,
@@ -47,9 +43,9 @@ impl Whisper {
             Self::audio_to_text(&whisper_context_clone, audio_data, previous_tokens)
         });
 
-        let (segments, audio_duration) = conversion_task.await.unwrap();
+        let segments = conversion_task.await.unwrap();
 
-        TranscriptionResponse(api_types::TranscribedMessage {
+        TranscriptionResponse(TranscribedMessage {
             start_timestamp,
             user_id,
             segments,
@@ -65,8 +61,8 @@ impl Whisper {
     fn audio_to_text(
         whisper_context: &WhisperContext,
         audio_data_bytes: bytes::Bytes,
-        previous_tokens: Vec<types::WhisperToken>,
-    ) -> (Vec<api_types::TextSegment>, Duration) {
+        previous_tokens: Vec<WhisperToken>,
+    ) -> Vec<TextSegment> {
         let mut state = whisper_context.create_state().unwrap();
 
         let audio_len_bytes = audio_data_bytes.len();
@@ -77,8 +73,6 @@ impl Whisper {
                 audio_len_samples,
             )
         };
-        let audio_duration =
-            Duration::from_millis((audio_len_samples / WHISPER_SAMPLES_PER_MILLISECOND) as u64);
 
         // actually convert audio to text.  Takes a while.
         state
@@ -86,7 +80,7 @@ impl Whisper {
             .unwrap();
 
         let num_segments = state.full_n_segments().unwrap();
-        let mut segments = Vec::<api_types::TextSegment>::with_capacity(num_segments as usize);
+        let mut segments = Vec::<TextSegment>::with_capacity(num_segments as usize);
         for i in 0..num_segments {
             let num_tokens = state.full_n_tokens(i).unwrap();
             let mut tokens_with_probability =
@@ -94,8 +88,8 @@ impl Whisper {
             for j in 0..num_tokens {
                 let token_text = state.full_get_token_text(i, j).unwrap();
                 let token_id = state.full_get_token_id(i, j).unwrap();
-                let probability = (state.full_get_token_prob(i, j).unwrap() * 100.0)
-                    as WhisperTokenProbabilityPercentage;
+                let probability = (state.full_get_token_prob(i, j).unwrap() * 100.0) as u32;
+
                 tokens_with_probability.push(TokenWithProbability {
                     probability,
                     token_id,
@@ -104,16 +98,16 @@ impl Whisper {
             }
             let start_offset_ms = state.full_get_segment_t0(i).unwrap() as u32;
             let end_offset_ms = state.full_get_segment_t1(i).unwrap() as u32;
-            segments.push(api_types::TextSegment {
+            segments.push(TextSegment {
                 start_offset_ms,
                 end_offset_ms,
                 tokens_with_probability,
             });
         }
-        (segments, audio_duration)
+        segments
     }
 
-    fn make_params(previous_tokens: &Vec<types::WhisperToken>) -> FullParams<'_, '_> {
+    fn make_params(previous_tokens: &Vec<WhisperToken>) -> FullParams<'_, '_> {
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
 
         params.set_print_special(false);

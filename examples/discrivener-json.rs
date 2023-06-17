@@ -1,12 +1,12 @@
 use clap::Parser;
-use discrivener::api::api_methods;
+use discrivener::Discrivener;
 
 use std::sync::Arc;
 use tokio::signal;
 
 #[tokio::main]
 async fn tokio_main(cli: Cli) {
-    let mut discrivener = api_methods::Discrivener::load(
+    let mut discrivener = Discrivener::load(
         cli.model_path,
         Arc::new(|event| println!("{}", serde_json::to_string(&event).unwrap())),
     )
