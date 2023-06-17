@@ -81,7 +81,21 @@ impl UserAudio {
                 }
             }
         }
+        for message in result.iter() {
+            self.add_tokens(message);
+        }
         result.into_iter()
+    }
+
+    fn add_tokens(&mut self, message: &TranscribedMessage) {
+        for segment in message.segments.iter() {
+            for token in &segment.tokens_with_probability {
+                self.last_tokens.push_back(token.token_id);
+                if self.last_tokens.len() > TOKENS_TO_KEEP {
+                    self.last_tokens.pop_front();
+                }
+            }
+        }
     }
 
     pub fn handle_transcription_response(
@@ -99,7 +113,11 @@ impl UserAudio {
             }
         });
         if let Some(slice) = slice_opt {
-            slice.handle_transcription_response(message)
+            let result = slice.handle_transcription_response(message);
+            if result.is_some() {
+                self.add_tokens(&result.as_ref().unwrap());
+            }
+            result
         } else {
             eprintln!("couldn't find slice for response");
             None
