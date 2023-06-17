@@ -300,3 +300,62 @@ impl TranscribedMessage {
         (first, second)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn test_split_at_end_time() {
+        let message = TranscribedMessage {
+            segments: vec![
+                TextSegment {
+                    tokens_with_probability: vec![TokenWithProbability {
+                        token_id: 0,
+                        token_text: "hello".to_string(),
+                        probability: 50,
+                    }],
+                    start_offset_ms: 0,
+                    end_offset_ms: 1000,
+                },
+                TextSegment {
+                    tokens_with_probability: vec![TokenWithProbability {
+                        token_id: 1,
+                        token_text: "world".to_string(),
+                        probability: 50,
+                    }],
+                    start_offset_ms: 1000,
+                    end_offset_ms: 2000,
+                },
+            ],
+            start_timestamp: SystemTime::UNIX_EPOCH,
+            user_id: 0,
+            audio_duration: Duration::from_secs(2),
+            processing_time: Duration::from_millis(1),
+        };
+        let (first, second) = TranscribedMessage::split_at_end_time(
+            &message,
+            SystemTime::UNIX_EPOCH + Duration::from_secs(1),
+        );
+        let first = first.unwrap();
+        let first_segments = first.segments;
+        let second = second.unwrap();
+        let second_segments = second.segments;
+        assert_eq!(first_segments.len(), 1);
+        assert_eq!(second_segments.len(), 1);
+        assert_eq!(
+            first_segments[0].tokens_with_probability[0].token_text,
+            "hello"
+        );
+        assert_eq!(
+            second_segments[0].tokens_with_probability[0].token_text,
+            "world"
+        );
+        assert_eq!(
+            second.start_timestamp,
+            SystemTime::UNIX_EPOCH + Duration::from_secs(1)
+        );
+        assert_eq!(second_segments[0].start_offset_ms, 0)
+    }
+}
