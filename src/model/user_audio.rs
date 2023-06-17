@@ -115,7 +115,7 @@ impl UserAudio {
         if let Some(slice) = slice_opt {
             let result = slice.handle_transcription_response(message);
             if result.is_some() {
-                self.add_tokens(&result.as_ref().unwrap());
+                self.add_tokens(result.as_ref().unwrap());
             }
             result
         } else {
