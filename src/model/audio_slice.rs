@@ -186,7 +186,7 @@ impl AudioSlice {
             let duration = now.duration_since(start_time).unwrap();
 
             let buffer = self.audio.as_slice();
-            let buffer_len_bytes = std::mem::size_of_val(&buffer);
+            let buffer_len_bytes = std::mem::size_of_val(buffer);
             let byte_data = unsafe {
                 std::slice::from_raw_parts(buffer.as_ptr() as *const u8, buffer_len_bytes)
             };

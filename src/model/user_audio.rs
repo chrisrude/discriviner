@@ -44,7 +44,7 @@ impl UserAudio {
     pub fn add_audio(
         &mut self,
         rtc_timestamp: DiscordRtcTimestamp,
-        discord_audio: &Vec<types::DiscordAudioSample>,
+        discord_audio: &[types::DiscordAudioSample],
     ) {
         // find a slice that will take the audio, and add it.
         // create a new slice if necessary.
