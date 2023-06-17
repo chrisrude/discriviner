@@ -4,7 +4,9 @@ use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperToken};
 
 use crate::events::audio::{TranscriptionRequest, TranscriptionResponse};
 
-use super::types::{TextSegment, TokenWithProbability, TranscribedMessage, WhisperAudioSample};
+use super::model::types::{
+    TextSegment, TokenWithProbability, TranscribedMessage, WhisperAudioSample,
+};
 
 pub(crate) struct Whisper {
     whisper_context: Arc<WhisperContext>,

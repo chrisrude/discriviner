@@ -4,11 +4,11 @@ use crate::model::audio_manager::AudioManager;
 use model::constants::USER_SILENCE_TIMEOUT;
 use model::types::VoiceChannelEvent;
 use model::voice_activity::VoiceActivity;
-use model::whisper::Whisper;
 use songbird::id::{ChannelId, GuildId, UserId};
 use songbird::ConnectionInfo;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
+use whisper::Whisper;
 
 mod events {
     pub(crate) mod audio;
@@ -20,9 +20,9 @@ pub mod model {
     pub mod types;
     pub(crate) mod user_audio;
     pub(crate) mod voice_activity;
-    pub(crate) mod whisper;
 }
 mod packet_handler;
+mod whisper;
 
 pub struct Discrivener {
     // task which will fire API change events

@@ -17,9 +17,9 @@ use crate::{
 };
 
 use super::{
+    super::Whisper,
     types::{self, VoiceChannelEvent},
     user_audio::UserAudio,
-    whisper::Whisper,
 };
 
 /// Handles a set of audio buffers, one for each user who is
