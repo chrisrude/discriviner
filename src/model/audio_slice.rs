@@ -12,8 +12,8 @@ use super::{
         USER_SILENCE_TIMEOUT_LOOSE,
     },
     types::{
-        self, DiscordAudioSample, DiscordRtcTimestamp, DiscordRtcTimestampInner,
-        TranscribedMessage, WhisperAudioSample,
+        self, DiscordAudioSample, DiscordRtcTimestamp, DiscordRtcTimestampInner, Transcription,
+        WhisperAudioSample,
     },
 };
 
@@ -58,7 +58,7 @@ pub(crate) struct AudioSlice {
     pub finalized: bool,
     pub last_request: Option<Duration>,
     pub start_time: Option<(DiscordRtcTimestamp, SystemTime)>,
-    pub tentative_transcription: Option<TranscribedMessage>,
+    pub tentative_transcription: Option<Transcription>,
 }
 
 impl AudioSlice {
@@ -250,7 +250,7 @@ impl AudioSlice {
         }
     }
 
-    pub fn finalize(&mut self) -> Option<TranscribedMessage> {
+    pub fn finalize(&mut self) -> Option<Transcription> {
         self.finalized = true;
 
         // if we had a tentative transcription, return it.
@@ -273,17 +273,17 @@ impl AudioSlice {
 
     pub fn handle_transcription_response(
         &mut self,
-        message: &TranscribedMessage,
-    ) -> Option<TranscribedMessage> {
+        message: &Transcription,
+    ) -> Option<Transcription> {
         // figure out how many segments have an end time that's more
         // than USER_SILENCE_TIMEOUT ago.  Those will be returned to
-        // the caller in a TranscribedMessage.
+        // the caller in a Transcription.
         // The remainder, if any, will be kept in tentative_transcription,
         // but only if we haven't seen new audio since the response was generated.
 
         if let Some(end_time) = self.finalize_timestamp() {
             let (finalized_opt, mut tentative_opt) =
-                TranscribedMessage::split_at_end_time(message, end_time);
+                Transcription::split_at_end_time(message, end_time);
             if self.finalized {
                 assert!(tentative_opt.is_none());
             }

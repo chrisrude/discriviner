@@ -7,7 +7,7 @@ use crate::events::audio::TranscriptionRequest;
 use super::{
     audio_slice::AudioSlice,
     constants::TOKENS_TO_KEEP,
-    types::{DiscordAudioSample, DiscordRtcTimestamp, TranscribedMessage, UserId},
+    types::{DiscordAudioSample, DiscordRtcTimestamp, Transcription, UserId},
 };
 
 /// A buffer of audio data for a single user.
@@ -67,7 +67,7 @@ impl UserAudio {
         slice.add_audio(rtc_timestamp, discord_audio);
     }
 
-    pub fn handle_user_silence(&mut self) -> impl Iterator<Item = TranscribedMessage> {
+    pub fn handle_user_silence(&mut self) -> impl Iterator<Item = Transcription> {
         let now = std::time::SystemTime::now();
         // finalize all slices that have a finalize timestamp
         // that is older than now.
@@ -87,7 +87,7 @@ impl UserAudio {
         result.into_iter()
     }
 
-    fn add_tokens(&mut self, message: &TranscribedMessage) {
+    fn add_tokens(&mut self, message: &Transcription) {
         for segment in message.segments.iter() {
             for token in &segment.tokens_with_probability {
                 self.last_tokens.push_back(token.token_id);
@@ -100,8 +100,8 @@ impl UserAudio {
 
     pub fn handle_transcription_response(
         &mut self,
-        message: &TranscribedMessage,
-    ) -> Option<TranscribedMessage> {
+        message: &Transcription,
+    ) -> Option<Transcription> {
         // find the slice whose start time matches the response's start time.
         // if we find it, then we can update the slice with the response.
         // if we don't find it, then we can't do anything with the response.

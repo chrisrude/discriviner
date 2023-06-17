@@ -90,7 +90,7 @@ impl VoiceActivity {
                         self.speaking_users.insert(activity.user_id);
                         if was_empty {
                             self.tx_api_events.send(
-                                VoiceChannelEvent::SilentChannel(false)
+                                VoiceChannelEvent::ChannelSilent(false)
                             ).unwrap();
                         }
                     } else {
@@ -98,7 +98,7 @@ impl VoiceActivity {
                         self.speaking_users.remove(&activity.user_id);
                         if was_someone_speaking && self.speaking_users.is_empty() {
                             self.tx_api_events.send(
-                                VoiceChannelEvent::SilentChannel(true)
+                                VoiceChannelEvent::ChannelSilent(true)
                             ).unwrap();
                         }
                     }
@@ -160,7 +160,7 @@ mod tests {
         })
         .unwrap();
 
-        if let VoiceChannelEvent::SilentChannel(silent) = rx_silent_channel.recv().await.unwrap() {
+        if let VoiceChannelEvent::ChannelSilent(silent) = rx_silent_channel.recv().await.unwrap() {
             assert!(!silent);
         } else {
             panic!("expected silent channel event");
@@ -194,7 +194,7 @@ mod tests {
         })
         .unwrap();
 
-        if let VoiceChannelEvent::SilentChannel(silent) = rx_silent_channel.recv().await.unwrap() {
+        if let VoiceChannelEvent::ChannelSilent(silent) = rx_silent_channel.recv().await.unwrap() {
             assert!(silent);
         } else {
             panic!("expected silent channel event");
@@ -232,7 +232,7 @@ mod tests {
         })
         .unwrap();
 
-        if let VoiceChannelEvent::SilentChannel(silent) = rx_silent_channel.recv().await.unwrap() {
+        if let VoiceChannelEvent::ChannelSilent(silent) = rx_silent_channel.recv().await.unwrap() {
             assert!(!silent);
         } else {
             panic!("expected silent channel event");
@@ -274,7 +274,7 @@ mod tests {
         .unwrap();
 
         // we should NOT have fired a timeout for user 2 yet
-        if let VoiceChannelEvent::SilentChannel(silent) = rx_silent_channel.recv().await.unwrap() {
+        if let VoiceChannelEvent::ChannelSilent(silent) = rx_silent_channel.recv().await.unwrap() {
             assert!(silent);
         } else {
             panic!("expected silent channel event");
@@ -292,7 +292,7 @@ mod tests {
         // we should still not fire a timeout for user 2, even
         // after some delay
         tokio::time::sleep(Duration::from_millis(20)).await;
-        if let VoiceChannelEvent::SilentChannel(silent) = rx_silent_channel.recv().await.unwrap() {
+        if let VoiceChannelEvent::ChannelSilent(silent) = rx_silent_channel.recv().await.unwrap() {
             assert!(!silent);
         } else {
             panic!("expected silent channel event");

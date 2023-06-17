@@ -135,7 +135,7 @@ impl<'a> AudioManager {
                         let transcripts = buffer.handle_user_silence();
                         for transcript in transcripts {
                             tx_api
-                            .send(VoiceChannelEvent::TranscribedMessage(
+                            .send(VoiceChannelEvent::Transcription(
                                 transcript,
                             ))
                             .unwrap();
@@ -154,7 +154,7 @@ impl<'a> AudioManager {
                         let message_opt = buffer.handle_transcription_response(&transcription_response.0);
                         if let Some(message) = message_opt {
                             tx_api
-                            .send(VoiceChannelEvent::TranscribedMessage(
+                            .send(VoiceChannelEvent::Transcription(
                                 message,
                             ))
                             .unwrap();

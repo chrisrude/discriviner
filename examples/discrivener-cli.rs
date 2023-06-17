@@ -1,11 +1,11 @@
 use clap::Parser;
 use colored::Colorize;
-use discrivener::model::types::{TranscribedMessage, VoiceChannelEvent};
+use discrivener::model::types::{Transcription, VoiceChannelEvent};
 use discrivener::Discrivener;
 use std::sync::Arc;
 use tokio::signal;
 
-fn on_text(message: TranscribedMessage, log_performance: bool) {
+fn on_text(message: Transcription, log_performance: bool) {
     if message.segments.is_empty() {
         println!();
         return;
@@ -44,7 +44,7 @@ async fn tokio_main(cli: Cli) {
     let mut discrivener = Discrivener::load(
         cli.model_path,
         Arc::new(move |event| match event {
-            VoiceChannelEvent::TranscribedMessage(message) => on_text(message, log_performance),
+            VoiceChannelEvent::Transcription(message) => on_text(message, log_performance),
             VoiceChannelEvent::Connect(status) => {
                 println!(
                     "Connection status: {} to channel #{}",
@@ -81,7 +81,7 @@ async fn tokio_main(cli: Cli) {
             VoiceChannelEvent::Disconnect(_) => {
                 println!("Connection status: {}", "disconnected".bright_red());
             }
-            VoiceChannelEvent::SilentChannel(silent) => {
+            VoiceChannelEvent::ChannelSilent(silent) => {
                 if silent {
                     println!("Channel is silent");
                 } else {

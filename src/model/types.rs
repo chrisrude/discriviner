@@ -29,7 +29,7 @@ pub struct UserJoinData {
 
 #[serde_as]
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize)]
-pub struct TranscribedMessage {
+pub struct Transcription {
     /// absolute time this message was received,
     /// as reported by the Discord server
     /// (NOT the local machine time)
@@ -172,11 +172,11 @@ pub struct DisconnectData {
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize)]
 pub enum VoiceChannelEvent {
     UserJoin(UserJoinData),
-    TranscribedMessage(TranscribedMessage),
     Connect(ConnectData),
     Reconnect(ConnectData),
     Disconnect(DisconnectData),
-    SilentChannel(bool),
+    Transcription(Transcription),
+    ChannelSilent(bool),
 }
 
 impl From<context_data::DisconnectKind> for DisconnectKind {
@@ -243,8 +243,8 @@ impl TextSegment {
     }
 }
 
-impl TranscribedMessage {
-    /// Splits the TranscribedMessage into two separate messages.
+impl Transcription {
+    /// Splits the Transcription into two separate messages.
     /// The first message will contain all segments that end before the given end_time.
     /// The second message will contain all segments that end at or after the given end_time.
     ///
@@ -254,7 +254,7 @@ impl TranscribedMessage {
     ///
     /// If there are no segments in the provided message at all, both messages will be None.
     pub(crate) fn split_at_end_time(
-        message: &TranscribedMessage,
+        message: &Transcription,
         end_time: SystemTime,
     ) -> (Option<Self>, Option<Self>) {
         let fn_first_half = |segment: &TextSegment| {
@@ -318,7 +318,7 @@ mod tests {
 
     #[test]
     fn test_split_at_end_time() {
-        let message = TranscribedMessage {
+        let message = Transcription {
             segments: vec![
                 TextSegment {
                     tokens_with_probability: vec![TokenWithProbability {
@@ -344,7 +344,7 @@ mod tests {
             audio_duration: Duration::from_secs(2),
             processing_time: Duration::from_millis(1),
         };
-        let (first, second) = TranscribedMessage::split_at_end_time(
+        let (first, second) = Transcription::split_at_end_time(
             &message,
             SystemTime::UNIX_EPOCH + Duration::from_secs(1),
         );
