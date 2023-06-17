@@ -141,7 +141,7 @@ mod tests {
         let non_empty = user_audio
             .slices
             .iter()
-            .filter(|s| !s.start_time.is_none())
+            .filter(|s| s.start_time.is_some())
             .count();
         assert_eq!(non_empty, 1);
         assert_eq!(user_audio.slices[0].audio.len(), 960 / (2 * 3));
@@ -150,7 +150,7 @@ mod tests {
         let non_empty_2 = user_audio
             .slices
             .iter()
-            .filter(|s| !s.start_time.is_none())
+            .filter(|s| s.start_time.is_some())
             .count();
         assert_eq!(non_empty_2, 2);
         assert_eq!(user_audio.slices[1].audio.len(), 960 / (2 * 3));
