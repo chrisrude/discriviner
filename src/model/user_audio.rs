@@ -37,7 +37,7 @@ impl UserAudio {
         Self {
             slices: vec![AudioSlice::new(), AudioSlice::new()],
             last_tokens: VecDeque::with_capacity(types::TOKENS_TO_KEEP),
-            user_id: user_id,
+            user_id,
         }
     }
 

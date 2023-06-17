@@ -254,7 +254,7 @@ impl TranscribedMessage {
         let mut first_segments = vec![];
         let mut second_segments = vec![];
         for segment in message.segments.iter() {
-            if fn_first_half(&segment) {
+            if fn_first_half(segment) {
                 first_segments.push(segment.clone());
             } else {
                 second_segments.push(segment.clone());
