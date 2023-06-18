@@ -93,7 +93,7 @@ impl Whisper {
                 let probability = (state.full_get_token_prob(i, j).unwrap() * 100.0) as u32;
 
                 tokens_with_probability.push(TokenWithProbability {
-                    probability,
+                    p: probability,
                     token_id,
                     token_text: token_text.to_string(),
                 });
@@ -120,6 +120,7 @@ impl Whisper {
         params.set_print_progress(false);
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
+        params.set_suppress_non_speech_tokens(true);
 
         params.set_tokens(previous_tokens.as_slice());
 

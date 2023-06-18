@@ -47,7 +47,7 @@ pub struct Transcription {
 #[serde_as]
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, Serialize, Deserialize)]
 pub struct TokenWithProbability {
-    pub probability: u32,
+    pub p: u32,
     pub token_id: i32,
     pub token_text: String,
 }
@@ -164,13 +164,13 @@ pub struct DisconnectData {
 
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize)]
 pub enum VoiceChannelEvent {
+    ChannelSilent(bool),
+    Connect(ConnectData),
+    Disconnect(DisconnectData),
+    Reconnect(ConnectData),
+    Transcription(Transcription),
     UserJoin(UserId),
     UserLeave(UserId),
-    Connect(ConnectData),
-    Reconnect(ConnectData),
-    Disconnect(DisconnectData),
-    Transcription(Transcription),
-    ChannelSilent(bool),
 }
 
 impl From<context_data::DisconnectKind> for DisconnectKind {
@@ -358,7 +358,7 @@ mod tests {
                     tokens_with_probability: vec![TokenWithProbability {
                         token_id: 0,
                         token_text: "hello".to_string(),
-                        probability: 50,
+                        p: 50,
                     }],
                     start_offset_ms: 0,
                     end_offset_ms: 1000,
@@ -367,7 +367,7 @@ mod tests {
                     tokens_with_probability: vec![TokenWithProbability {
                         token_id: 1,
                         token_text: "world".to_string(),
-                        probability: 50,
+                        p: 50,
                     }],
                     start_offset_ms: 1000,
                     end_offset_ms: 2000,

@@ -9,8 +9,9 @@ async fn tokio_main(cli: Cli) {
     let mut discrivener = Discrivener::load(
         cli.model_path,
         Arc::new(|event| {
-            // eprintln!("API Event: {:?}", serde_json::to_string(&event).unwrap());
-            println!("{}", serde_json::to_string(&event).unwrap());
+            let json_string = serde_json::to_string(&event).unwrap();
+            // eprintln!("API Event: {:?}", json_string);
+            println!("{}", json_string);
         }),
     )
     .await;

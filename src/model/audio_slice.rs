@@ -309,6 +309,10 @@ impl AudioSlice {
     pub fn discard_audio(&mut self, duration: &Duration) {
         let discard_idx = duration.as_millis() as usize * WHISPER_SAMPLES_PER_MILLISECOND;
 
+        if duration.is_zero() {
+            return;
+        }
+
         eprintln!(
             "discarding {} ms of audio from {} ms buffer",
             duration.as_millis(),
@@ -350,17 +354,19 @@ impl AudioSlice {
         if self.tentative_transcript_opt.is_none() {
             // if we don't have a tentative transcription, then
             // we can't return anything
-            eprintln!("no tentative transcription in finalize, returning None");
+            // eprintln!("no tentative transcription in finalize, returning None");
             return None;
         }
 
         let tentative_transcript = self.tentative_transcript_opt.take().unwrap();
 
-        eprintln!(
-            "tentative description has {} segments, covering {} ms",
-            tentative_transcript.segments.len(),
-            tentative_transcript.audio_duration.as_millis(),
-        );
+        if tentative_transcript.segments.len() > 0 {
+            eprintln!(
+                "tentative description has {} segments, covering {} ms",
+                tentative_transcript.segments.len(),
+                tentative_transcript.audio_duration.as_millis(),
+            );
+        }
 
         // if we had a tentative transcription, return it.
         // We know that it's current, since if we had gathered
@@ -463,10 +469,10 @@ impl AudioSlice {
         );
 
         if self.buffer_duration() == tentative_transcript.audio_duration {
-            eprintln!("keeping tentative transcription");
+            // eprintln!("keeping tentative transcription");
             self.tentative_transcript_opt = Some(tentative_transcript);
         } else {
-            eprintln!("discarding tentative transcription");
+            // eprintln!("discarding tentative transcription");
             self.tentative_transcript_opt = None;
         }
 
