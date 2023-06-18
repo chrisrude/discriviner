@@ -7,10 +7,7 @@ use std::{
 use bytes::Bytes;
 
 use super::{
-    constants::{
-        AUDIO_TO_RECORD_SECONDS, AUTO_TRANSCRIPTION_PERIOD_MS, USER_SILENCE_TIMEOUT,
-        USER_SILENCE_TIMEOUT_LOOSE,
-    },
+    constants::{AUDIO_TO_RECORD_SECONDS, AUTO_TRANSCRIPTION_PERIOD_MS, USER_SILENCE_TIMEOUT},
     types::{
         self, DiscordAudioSample, DiscordRtcTimestamp, DiscordRtcTimestampInner, Transcription,
         WhisperAudioSample,
@@ -57,9 +54,12 @@ fn samples_to_duration(num_samples: usize) -> u64 {
     (num_samples / WHISPER_SAMPLES_PER_MILLISECOND) as u64
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct LastRequestInfo {
+    pub start_time: SystemTime,
     pub original_duration: Duration,
     pub audio_trimmed_since_request: Duration,
+    pub in_progress: bool,
 }
 
 impl LastRequestInfo {
@@ -106,6 +106,7 @@ impl AudioSlice {
     pub fn fits_within_this_slice(&self, rtc_timestamp: DiscordRtcTimestamp) -> bool {
         if self.finalized {
             // if the slice is finalized, then it can take no more audio
+            eprintln!("won't fit because finalized");
             return false;
         }
         if let Some((start_rtc, _)) = self.start_time {
@@ -115,14 +116,23 @@ impl AudioSlice {
             let timeout = duration_to_rtc(&USER_SILENCE_TIMEOUT);
             let end = current_end + timeout;
 
+            let result;
             if start_rtc < end {
-                rtc_timestamp >= start_rtc && rtc_timestamp < end
+                result = rtc_timestamp >= start_rtc && rtc_timestamp < end
             } else {
                 // if the slice wraps around, then we need to check
                 // if the timestamp is either before the end or after
                 // the start.
-                rtc_timestamp < end || rtc_timestamp >= start_rtc
+                result = rtc_timestamp < end || rtc_timestamp >= start_rtc
             }
+
+            if !result {
+                eprintln!(
+                    "{}: timestamp {} does not fit within slice.  start={:?} end={:?}",
+                    self.slice_id, rtc_timestamp, self.start_time, end,
+                )
+            }
+            result
         } else {
             // this is a blank slice, so any timestamp fits
             true
@@ -219,7 +229,17 @@ impl AudioSlice {
         if user_silent {
             // if the user is silent, then we need to request the full
             // buffer, even if no period shift has occurred
+            // in this case we'll have two outstanding transcription
+            // requests...
             return true;
+        }
+
+        if let Some(last_request) = self.last_request.as_ref() {
+            if last_request.in_progress {
+                // we already have a pending request, so we don't need to
+                // make another one
+                return false;
+            }
         }
 
         let current_period = self.buffer_duration().as_millis() / AUTO_TRANSCRIPTION_PERIOD_MS;
@@ -236,9 +256,9 @@ impl AudioSlice {
 
     pub fn make_transcription_request(
         &mut self,
-        user_silent: bool,
+        user_idle: bool,
     ) -> Option<(Bytes, Duration, u32, SystemTime)> {
-        if !self.is_ready_for_transcription(user_silent) {
+        if !self.is_ready_for_transcription(user_idle) {
             return None;
         }
         if let Some((_, start_time)) = self.start_time {
@@ -254,10 +274,22 @@ impl AudioSlice {
                 self.slice_id,
                 duration.as_millis()
             );
-            self.last_request = Some(LastRequestInfo {
-                original_duration: self.buffer_duration(),
+            let new_request = LastRequestInfo {
+                start_time,
                 audio_trimmed_since_request: Duration::ZERO,
-            });
+                original_duration: self.buffer_duration(),
+                in_progress: true,
+            };
+            if let Some(last_request) = self.last_request.as_ref() {
+                if last_request == &new_request {
+                    eprintln!("{}: discarding duplicate request", self.slice_id);
+                    return None;
+                }
+                if last_request.in_progress {
+                    eprintln!("{}: discarding previous in-progress request", self.slice_id);
+                }
+            }
+            self.last_request = Some(new_request);
             return Some((Bytes::from(byte_data), duration, self.slice_id, start_time));
         }
         None
@@ -270,14 +302,14 @@ impl AudioSlice {
     pub fn discard_audio(&mut self, duration: &Duration) {
         let discard_idx = duration.as_millis() as usize * WHISPER_SAMPLES_PER_MILLISECOND;
 
-        // eprintln!(
-        //     "discarding {} ms of audio from {} ms buffer",
-        //     duration.as_millis(),
-        //     self.buffer_duration().as_millis()
-        // );
+        eprintln!(
+            "discarding {} ms of audio from {} ms buffer",
+            duration.as_millis(),
+            self.buffer_duration().as_millis()
+        );
 
-        if discard_idx > self.audio.len() {
-            // discard more than we have, so just clear the buffer
+        if discard_idx >= self.audio.len() {
+            // discard as much as we have, so just clear the buffer
             self.clear();
             return;
         }
@@ -288,7 +320,7 @@ impl AudioSlice {
         // update the start timestamp
         if let Some((start_rtc, start_system)) = self.start_time {
             self.start_time = Some((
-                start_rtc - duration_to_rtc(duration),
+                start_rtc + duration_to_rtc(duration),
                 start_system + *duration,
             ));
         }
@@ -338,7 +370,7 @@ impl AudioSlice {
 
     pub fn finalize_timestamp(&self) -> Option<SystemTime> {
         if let Some((_, start_time)) = self.start_time {
-            Some(start_time + self.buffer_duration() + USER_SILENCE_TIMEOUT_LOOSE)
+            Some(start_time + self.buffer_duration() + USER_SILENCE_TIMEOUT)
         } else {
             None
         }
@@ -364,14 +396,40 @@ impl AudioSlice {
                 finalized_transcript.audio_duration + tentative_transcript.audio_duration,
                 message.audio_duration
             );
+            assert!(self.last_request.is_some());
+            assert!(self.last_request.as_ref().unwrap().in_progress);
+            // if we had more than one request in flight, we need to
+            // ignore all but the latest
+            if let Some(last_request) = self.last_request.as_ref() {
+                if last_request.start_time != message.start_timestamp {
+                    eprintln!(
+                        "ignoring transcription response with start time {:?} (expected {:?})",
+                        message.start_timestamp, last_request.start_time
+                    );
+                    return None;
+                }
+                if message.audio_duration < last_request.original_duration {
+                    eprintln!(
+                        "ignoring transcription response with duration {:?} (expected {:?})",
+                        message.audio_duration, last_request.original_duration
+                    );
+                    return None;
+                }
+            }
+            assert_eq!(
+                self.last_request.as_ref().unwrap().original_duration,
+                message.audio_duration
+            );
+            self.last_request.as_mut().unwrap().in_progress = false;
 
-            // eprintln!(
-            //     "have transcription: {} final segments ({} ms), {} tentative segments ({} ms)",
-            //     finalized_transcript.segments.len(),
-            //     finalized_transcript.audio_duration.as_millis(),
-            //     tentative_transcript.segments.len(),
-            //     tentative_transcript.audio_duration.as_millis(),
-            // );
+            eprintln!(
+                "have transcription: {} final segments ({} ms), {} tentative segments ({} ms)",
+                finalized_transcript.segments.len(),
+                finalized_transcript.audio_duration.as_millis(),
+                tentative_transcript.segments.len(),
+                tentative_transcript.audio_duration.as_millis(),
+            );
+
             // eprintln!("finalized transcription: '{}'", finalized_transcript.text(),);
             // eprintln!("tentative transcription: '{}'", tentative_transcript.text(),);
 
@@ -392,7 +450,11 @@ impl AudioSlice {
                 self.tentative_transcript_opt = None;
             }
 
-            Some(finalized_transcript)
+            if finalized_transcript.is_empty() {
+                None
+            } else {
+                Some(finalized_transcript)
+            }
         } else {
             None
         }

@@ -44,11 +44,12 @@ pub(crate) struct UserAudio {
 impl UserAudio {
     pub fn new(user_id: UserId) -> Self {
         Self {
-            slices: vec![AudioSlice::new(1), AudioSlice::new(2)],
+            // todo: , AudioSlice::new(2)
+            slices: vec![AudioSlice::new(1)],
             last_tokens: VecDeque::with_capacity(TOKENS_TO_KEEP),
             user_id,
             user_silent: false,
-            next_slice_id: 3,
+            next_slice_id: 2,
         }
     }
 
@@ -68,28 +69,31 @@ impl UserAudio {
         {
             slice
         } else {
-            // if we didn't find a slice, then we need to create a new one.
-            self.slices.push(AudioSlice::new(self.next_slice_id));
-            self.next_slice_id += 1;
-            eprintln!("created new slice, total is now {}", self.slices.len());
-            self.slices.last_mut().unwrap()
+            eprintln!("won't create new slice, discord_audio");
+            return;
+            // todo
+            // // if we didn't find a slice, then we need to create a new one.
+            // self.slices.push(AudioSlice::new(self.next_slice_id));
+            // self.next_slice_id += 1;
+            // eprintln!("created new slice, total is now {}", self.slices.len());
+            // self.slices.last_mut().unwrap()
         };
         slice.add_audio(rtc_timestamp, discord_audio);
     }
 
-    pub fn handle_user_inactive(&mut self) -> impl Iterator<Item = Transcription> {
-        assert!(self.user_silent);
-        let now = std::time::SystemTime::now();
+    pub fn handle_user_idle(&mut self) -> impl Iterator<Item = Transcription> {
+        // assert!(self.user_silent);
+        if !self.user_silent {
+            eprintln!("user is not silent, user inactive called anyway!");
+            // todo: fix!
+        }
+
         // finalize all slices that have a finalize timestamp
         // that is older than now.
         let mut result = Vec::new();
         for slice in self.slices.iter_mut() {
-            if let Some(finalize_timestamp) = slice.finalize_timestamp() {
-                if finalize_timestamp < now {
-                    if let Some(message) = slice.finalize() {
-                        result.push(message);
-                    }
-                }
+            if let Some(message) = slice.finalize() {
+                result.push(message);
             }
         }
         for message in result.iter() {

@@ -129,13 +129,13 @@ impl<'a> AudioManager {
                         )
                     });
                 }
-                Some((user_id, inactive)) = self.rx_silent_user_events.recv() => {
+                Some((user_id, idle)) = self.rx_silent_user_events.recv() => {
                     // this user has stopped talking for long enough, see if
                     // we have any audio left to finalize
                     self.with_buffer_for_user(user_id, |buffer| {
-                        eprintln!("user {:?} has stopped talking", user_id);
-                        if inactive {
-                            let transcripts = buffer.handle_user_inactive();
+                        eprintln!("user {:?} has become idle", user_id);
+                        if idle {
+                            let transcripts = buffer.handle_user_idle();
                             for transcript in transcripts {
                                 eprintln!("sending transcription to API: {:?}", transcript.text());
                                 tx_api
@@ -158,7 +158,7 @@ impl<'a> AudioManager {
                     // we got a transcription response, determine if it's a final transcription
                     // and if so send it to the API
                     self.with_buffer_for_user(transcript.user_id, |buffer| {
-                        eprintln!("user {:?} has transcription response", transcript.user_id);
+                        // eprintln!("user {:?} has transcription response", transcript.user_id);
 
                         let transcript_opt = buffer.handle_transcription_response(&transcript, slice_id);
                         if let Some(transcript) = transcript_opt {

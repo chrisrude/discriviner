@@ -15,11 +15,4 @@ pub(crate) const USER_SILENCE_TIMEOUT_MS: usize = 2000;
 pub(crate) const USER_SILENCE_TIMEOUT: Duration =
     Duration::from_millis(USER_SILENCE_TIMEOUT_MS as u64);
 
-// add a slightly less strict timeout, as there can be some variance
-// between the processing of the different tasks.  We'll generate timeout
-// events using the stricter timeout, but allow them to be applied even
-// if the lesser timeout fits.
-pub(crate) const USER_SILENCE_TIMEOUT_LOOSE: Duration =
-    Duration::from_millis(USER_SILENCE_TIMEOUT_MS as u64 - 100);
-
 pub(crate) const DISCARD_USER_AUDIO_AFTER: Duration = Duration::from_secs(10 * 60);

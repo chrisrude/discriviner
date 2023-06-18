@@ -1,4 +1,5 @@
 use std::{
+    cmp::min,
     num::Wrapping,
     time::{Duration, SystemTime},
 };
@@ -255,6 +256,7 @@ impl Transcription {
             message.start_timestamp + Duration::from_millis(segment.end_offset_ms as u64)
                 <= end_time
         };
+        assert!(end_time >= message.start_timestamp);
         let mut first_segments = vec![];
         let mut second_segments = vec![];
         for segment in message.segments.iter() {
@@ -267,11 +269,36 @@ impl Transcription {
 
         // eprintln!("first_segments: {:?}", first_segments);
 
-        let first_duration = first_segments
+        let mut first_duration = first_segments
             .iter()
             .map(|segment| Duration::from_millis(segment.end_offset_ms as u64))
             .max()
             .unwrap_or(Duration::ZERO);
+
+        // if we didn't find anything in the first half, then we need to
+        // just take everything up to the end_time
+        if first_duration == Duration::ZERO {
+            if second_segments.is_empty() {
+                first_duration = end_time.duration_since(message.start_timestamp).unwrap()
+            } else {
+                // there are segments in the second half, so we need to
+                // make sure that we don't cut out any of their audio
+                // by setting the first_duration to take us to the
+                // soonest ending segment in the second half which
+                // is no greater than the end_time
+                let earliest_second_segment = second_segments
+                    .iter()
+                    .map(|segment| Duration::from_millis(segment.start_offset_ms as u64))
+                    .filter(|duration| message.start_timestamp + *duration <= end_time)
+                    .min()
+                    .unwrap();
+                first_duration = min(
+                    earliest_second_segment,
+                    end_time.duration_since(message.start_timestamp).unwrap(),
+                );
+            }
+        }
+        first_duration = min(first_duration, message.audio_duration);
 
         let first_transcript = Self {
             segments: first_segments,
@@ -308,6 +335,9 @@ impl Transcription {
         for segment in &self.segments {
             text.push_str(segment.text().as_str());
         }
+        text.push_str("(");
+        text.push_str(self.segments.len().to_string().as_str());
+        text.push_str(" segments)");
         text
     }
 }

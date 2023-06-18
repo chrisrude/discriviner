@@ -102,8 +102,8 @@ impl Whisper {
                     token_text: token_text.to_string(),
                 });
             }
-            let start_offset_ms = state.full_get_segment_t0(i).unwrap() as u32;
-            let end_offset_ms = state.full_get_segment_t1(i).unwrap() as u32;
+            let start_offset_ms = 10 * state.full_get_segment_t0(i).unwrap() as u32;
+            let end_offset_ms = 10 * state.full_get_segment_t1(i).unwrap() as u32;
             segments.push(TextSegment {
                 start_offset_ms,
                 end_offset_ms,
