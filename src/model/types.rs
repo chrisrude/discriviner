@@ -309,6 +309,16 @@ impl Transcription {
 
         (first, second)
     }
+
+    pub(crate) fn text(&self) -> String {
+        // take all token_text values and concatenate them
+        // returning the string
+        let mut text = String::new();
+        for segment in &self.segments {
+            text.push_str(segment.text().as_str());
+        }
+        text
+    }
 }
 
 #[cfg(test)]

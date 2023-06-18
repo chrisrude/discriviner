@@ -136,6 +136,7 @@ impl<'a> AudioManager {
                     self.with_buffer_for_user(user_id, |buffer| {
                         let transcripts = buffer.handle_user_silence();
                         for transcript in transcripts {
+                            eprintln!("sending transcription to API: {:?}", transcript.text());
                             tx_api
                             .send(VoiceChannelEvent::Transcription(
                                 transcript,
@@ -153,11 +154,12 @@ impl<'a> AudioManager {
                     // we got a transcription response, determine if it's a final transcription
                     // and if so send it to the API
                     self.with_buffer_for_user(transcription_response.0.user_id, |buffer| {
-                        let message_opt = buffer.handle_transcription_response(&transcription_response.0);
-                        if let Some(message) = message_opt {
+                        let transcript_opt = buffer.handle_transcription_response(&transcription_response.0);
+                        if let Some(transcript) = transcript_opt {
+                            eprintln!("sending transcription to API: {:?}", transcript.text());
                             tx_api
                             .send(VoiceChannelEvent::Transcription(
-                                message,
+                                transcript,
                             ))
                             .unwrap();
                         }

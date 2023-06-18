@@ -23,8 +23,8 @@ const DISCORD_SAMPLES_PER_SECOND: usize = 48000;
 const WHISPER_SAMPLES_PER_SECOND: usize = 16000;
 const WHISPER_SAMPLES_PER_MILLISECOND: usize = 16;
 
-// The RTC timestamp uses an 8khz clock.
-const RTC_CLOCK_SAMPLES_PER_MILLISECOND: u128 = 8;
+// The RTC timestamp uses an 48khz clock.
+const RTC_CLOCK_SAMPLES_PER_MILLISECOND: u128 = 48;
 
 // being a whole number. If this is not the case, we'll need to
 // do some more complicated resampling.
@@ -145,17 +145,28 @@ impl AudioSlice {
         // audio and the start of the new audio, fill it
         // with silence.
         if padding > 0 {
+            eprintln!(
+                "padding audio with {} samples, total of {} ms",
+                padding,
+                samples_to_duration(padding)
+            );
+            eprintln!(
+                "rtc timestamp: {}... start {}",
+                rtc_timestamp,
+                self.start_time.unwrap().0
+            );
             self.audio
                 .extend(iter::repeat(WhisperAudioSample::default()).take(padding));
+        }
+
+        if self.tentative_transcription.is_some() {
+            eprintln!("discarding tentative transcription");
         }
 
         // since more audio has come in, discard the tentative transcription
         self.tentative_transcription = None;
 
-        eprintln!("audio len is {}", self.audio.len());
-        eprintln!("adding {} samples to audio buffer", discord_audio.len());
         self.resample_audio_from_discord_to_whisper(discord_audio);
-        eprintln!("len is now {}", self.audio.len());
 
         // update the last slice to point to the end of the buffer
     }
@@ -271,11 +282,15 @@ impl AudioSlice {
         let (duration, mut transcription_opt) = self.tentative_transcription.take().unwrap();
 
         eprintln!(
-            "tentative description has {} segments",
+            "tentative description has {} segments, covering {} ms",
             transcription_opt
                 .as_ref()
                 .map(|x| x.segments.len())
-                .unwrap_or(0)
+                .unwrap_or(0),
+            transcription_opt
+                .as_ref()
+                .map(|x| x.audio_duration.as_millis())
+                .unwrap_or(0),
         );
 
         // if we had a tentative transcription, return it.
@@ -315,18 +330,41 @@ impl AudioSlice {
             if self.finalized {
                 assert!(tentative_opt.is_none());
             }
+            let time1 = tentative_opt
+                .as_ref()
+                .map(|x| x.audio_duration.as_millis())
+                .unwrap_or(0);
+            let time2 = finalized_opt
+                .as_ref()
+                .map(|x| x.audio_duration.as_millis())
+                .unwrap_or(0);
+            assert_eq!(time1 + time2, message.audio_duration.as_millis());
 
             eprintln!(
-                "have transcription: {} final segments, {} tentative segments",
+                "have transcription: {} final segments ({} ms), {} tentative segments ({} ms)",
                 finalized_opt
+                    .as_ref()
+                    .map(|x| x.segments.len())
+                    .unwrap_or(0),
+                finalized_opt
+                    .as_ref()
+                    .map(|x| x.audio_duration.as_millis())
+                    .unwrap_or(0),
+                tentative_opt
                     .as_ref()
                     .map(|x| x.segments.len())
                     .unwrap_or(0),
                 tentative_opt
                     .as_ref()
-                    .map(|x| x.segments.len())
-                    .unwrap_or(0)
+                    .map(|x| x.audio_duration.as_millis())
+                    .unwrap_or(0),
             );
+            if let Some(finalized) = finalized_opt.as_ref() {
+                eprintln!("finalized transcription: '{}'", finalized.text(),);
+            }
+            if let Some(tentative) = tentative_opt.as_ref() {
+                eprintln!("tentative transcription: '{}'", tentative.text(),);
+            }
 
             // if the current buffer duration matches the
             // duration in the passed-in transcription, then
