@@ -91,7 +91,7 @@ impl<'a> AudioManager {
         pending_requests: &mut FuturesUnordered<JoinHandle<TranscriptionResponse>>,
         buffer: &mut UserAudio,
     ) {
-        for request in buffer.try_get_transcription_requests() {
+        if let Some(request) = buffer.try_get_transcription_request() {
             let whisper_clone = whisper.clone();
             let join_handle =
                 tokio::spawn(
@@ -135,9 +135,8 @@ impl<'a> AudioManager {
                     self.with_buffer_for_user(user_id, |buffer| {
                         eprintln!("user {:?} has become idle", user_id);
                         if idle {
-                            let transcripts = buffer.handle_user_idle();
-                            for transcript in transcripts {
-                                eprintln!("sending transcription to API: {:?}", transcript.text());
+                            if let Some(transcript) = buffer.handle_user_idle() {
+                                eprintln!("sending final transcription to API: {:?}", transcript.text());
                                 tx_api
                                 .send(VoiceChannelEvent::Transcription(
                                     transcript,
@@ -154,13 +153,13 @@ impl<'a> AudioManager {
                         )
                     });
                 }
-                Ok(Some(TranscriptionResponse{ slice_id, transcript })) = pending_transcription_requests.try_next() => {
+                Ok(Some(TranscriptionResponse{ transcript })) = pending_transcription_requests.try_next() => {
                     // we got a transcription response, determine if it's a final transcription
                     // and if so send it to the API
                     self.with_buffer_for_user(transcript.user_id, |buffer| {
                         // eprintln!("user {:?} has transcription response", transcript.user_id);
 
-                        let transcript_opt = buffer.handle_transcription_response(&transcript, slice_id);
+                        let transcript_opt = buffer.handle_transcription_response(&transcript);
                         if let Some(transcript) = transcript_opt {
                             eprintln!("sending transcription to API: {:?}", transcript.text());
                             tx_api

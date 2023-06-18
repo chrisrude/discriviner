@@ -72,13 +72,13 @@ pub(crate) struct AudioSlice {
     pub audio: Vec<WhisperAudioSample>,
     pub finalized: bool,
     pub last_request: Option<LastRequestInfo>,
-    pub slice_id: u32,
+    pub slice_id: u64,
     pub start_time: Option<(DiscordRtcTimestamp, SystemTime)>,
     pub tentative_transcript_opt: Option<Transcription>,
 }
 
 impl AudioSlice {
-    pub fn new(slice_id: u32) -> Self {
+    pub fn new(slice_id: u64) -> Self {
         Self {
             audio: Vec::with_capacity(WHISPER_AUDIO_BUFFER_SIZE),
             finalized: false,
@@ -104,11 +104,6 @@ impl AudioSlice {
     /// An empty slice is considered to have no bounds, and will fit
     /// any timestamp.
     pub fn fits_within_this_slice(&self, rtc_timestamp: DiscordRtcTimestamp) -> bool {
-        if self.finalized {
-            // if the slice is finalized, then it can take no more audio
-            eprintln!("won't fit because finalized");
-            return false;
-        }
         if let Some((start_rtc, _)) = self.start_time {
             let current_end = start_rtc + duration_to_rtc(&self.buffer_duration());
 
@@ -147,16 +142,13 @@ impl AudioSlice {
         if !self.fits_within_this_slice(rtc_timestamp) {
             // if the timestamp is not within the bounds of this slice,
             // then we need to create a new slice.
-            if self.finalized {
-                eprintln!("{}: audio buffer overflow, dropping audio", self.slice_id);
-                return;
-            }
             eprintln!(
                 "{}: trying to add audio to inactive slice, dropping audio",
                 self.slice_id
             );
             return;
         }
+        self.finalized = false;
 
         let start_index;
         if let Some((start_rtc, _)) = self.start_time {
@@ -257,7 +249,7 @@ impl AudioSlice {
     pub fn make_transcription_request(
         &mut self,
         user_idle: bool,
-    ) -> Option<(Bytes, Duration, u32, SystemTime)> {
+    ) -> Option<(Bytes, Duration, SystemTime)> {
         if !self.is_ready_for_transcription(user_idle) {
             return None;
         }
@@ -290,7 +282,7 @@ impl AudioSlice {
                 }
             }
             self.last_request = Some(new_request);
-            return Some((Bytes::from(byte_data), duration, self.slice_id, start_time));
+            return Some((Bytes::from(byte_data), duration, start_time));
         }
         None
     }

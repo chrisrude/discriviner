@@ -24,7 +24,7 @@ use super::{
 /// This also stores the most recent tokens we've seen from
 /// this user.  This is used to help inform the decoder.
 pub(crate) struct UserAudio {
-    pub slices: Vec<AudioSlice>,
+    pub slice: AudioSlice,
 
     /// The most recent tokens we've seen from this
     /// user.  Used to help inform the decoder.
@@ -37,19 +37,16 @@ pub(crate) struct UserAudio {
     /// If true, the user is not speaking at this instant.
     /// (though they may had been speaking an instant ago)
     pub user_silent: bool,
-
-    pub next_slice_id: u32,
 }
 
 impl UserAudio {
     pub fn new(user_id: UserId) -> Self {
         Self {
             // todo: , AudioSlice::new(2)
-            slices: vec![AudioSlice::new(1)],
+            slice: AudioSlice::new(user_id),
             last_tokens: VecDeque::with_capacity(TOKENS_TO_KEEP),
             user_id,
             user_silent: false,
-            next_slice_id: 2,
         }
     }
 
@@ -61,45 +58,16 @@ impl UserAudio {
         // find a slice that will take the audio, and add it.
         // create a new slice if necessary.
         self.user_silent = false;
-
-        let slice = if let Some(slice) = self
-            .slices
-            .iter_mut()
-            .find(|s| s.fits_within_this_slice(rtc_timestamp))
-        {
-            slice
-        } else {
-            eprintln!("won't create new slice, discord_audio");
-            return;
-            // todo
-            // // if we didn't find a slice, then we need to create a new one.
-            // self.slices.push(AudioSlice::new(self.next_slice_id));
-            // self.next_slice_id += 1;
-            // eprintln!("created new slice, total is now {}", self.slices.len());
-            // self.slices.last_mut().unwrap()
-        };
-        slice.add_audio(rtc_timestamp, discord_audio);
+        self.slice.add_audio(rtc_timestamp, discord_audio);
     }
 
-    pub fn handle_user_idle(&mut self) -> impl Iterator<Item = Transcription> {
+    pub fn handle_user_idle(&mut self) -> Option<Transcription> {
         // assert!(self.user_silent);
         if !self.user_silent {
             eprintln!("user is not silent, user inactive called anyway!");
             // todo: fix!
         }
-
-        // finalize all slices that have a finalize timestamp
-        // that is older than now.
-        let mut result = Vec::new();
-        for slice in self.slices.iter_mut() {
-            if let Some(message) = slice.finalize() {
-                result.push(message);
-            }
-        }
-        for message in result.iter() {
-            self.add_tokens(message);
-        }
-        result.into_iter()
+        self.slice.finalize()
     }
 
     pub fn set_silent(&mut self) {
@@ -121,42 +89,28 @@ impl UserAudio {
     pub fn handle_transcription_response(
         &mut self,
         message: &Transcription,
-        slice_id: u32,
     ) -> Option<Transcription> {
-        // find the slice whose start time matches the response's start time.
-        // if we find it, then we can update the slice with the response.
-        // if we don't find it, then we can't do anything with the response.
-        let slice_opt = self
-            .slices
-            .iter_mut()
-            .find(|slice| slice.slice_id == slice_id);
-        if let Some(slice) = slice_opt {
-            let result = slice.handle_transcription_response(message);
-            if result.is_some() {
-                self.add_tokens(result.as_ref().unwrap());
-            }
-            result
+        let result = self.slice.handle_transcription_response(message);
+        if result.is_some() {
+            self.add_tokens(result.as_ref().unwrap());
+        }
+        result
+    }
+
+    pub fn try_get_transcription_request(&mut self) -> Option<TranscriptionRequest> {
+        if let Some((audio_data, audio_duration, start_timestamp)) =
+            self.slice.make_transcription_request(self.user_silent)
+        {
+            Some(TranscriptionRequest {
+                audio_data,
+                audio_duration,
+                previous_tokens: Vec::from(self.last_tokens.clone()),
+                start_timestamp,
+                user_id: self.user_id,
+            })
         } else {
             None
         }
-    }
-
-    pub fn try_get_transcription_requests(&mut self) -> impl Iterator<Item = TranscriptionRequest> {
-        self.slices
-            .iter_mut()
-            .filter_map(|s| s.make_transcription_request(self.user_silent))
-            .map(
-                |(audio_data, audio_duration, slice_id, start_timestamp)| TranscriptionRequest {
-                    audio_data,
-                    audio_duration,
-                    previous_tokens: Vec::from(self.last_tokens.clone()),
-                    slice_id,
-                    start_timestamp,
-                    user_id: self.user_id,
-                },
-            )
-            .collect::<Vec<_>>()
-            .into_iter()
     }
 }
 
@@ -174,21 +128,10 @@ mod tests {
         let audio = vec![2; 960];
         user_audio.add_audio(timestamp, &audio);
         // non empty slices
-        let non_empty = user_audio
-            .slices
-            .iter()
-            .filter(|s| s.start_time.is_some())
-            .count();
-        assert_eq!(non_empty, 1);
-        assert_eq!(user_audio.slices[0].audio.len(), 960 / (2 * 3));
+        assert!(user_audio.slice.start_time.is_some());
+        assert_eq!(user_audio.slice.audio.len(), 960 / (2 * 3));
 
         user_audio.add_audio(Wrapping(1001234), &audio);
-        let non_empty_2 = user_audio
-            .slices
-            .iter()
-            .filter(|s| s.start_time.is_some())
-            .count();
-        assert_eq!(non_empty_2, 2);
-        assert_eq!(user_audio.slices[1].audio.len(), 960 / (2 * 3));
+        assert_eq!(user_audio.slice.audio.len(), 960 / (2 * 3));
     }
 }
