@@ -120,11 +120,11 @@ impl AudioSlice {
         if !self.fits_within_this_slice(rtc_timestamp) {
             // if the timestamp is not within the bounds of this slice,
             // then we need to create a new slice.
-            eprintln!("audio buffer overflow, dropping audio");
-            return;
-        }
-        if self.finalized {
-            eprintln!("trying to add audio to finalized slice, dropping audio");
+            if self.finalized {
+                eprintln!("audio buffer overflow, dropping audio");
+                return;
+            }
+            eprintln!("trying to add audio to inactive slice, dropping audio");
             return;
         }
         // calculate the time difference between the end of the last
@@ -194,7 +194,7 @@ impl AudioSlice {
         }
     }
 
-    fn is_ready_for_transcription(&self) -> bool {
+    fn is_ready_for_transcription(&self, user_silent: bool) -> bool {
         if self.start_time.is_none() {
             return false;
         }
@@ -217,13 +217,22 @@ impl AudioSlice {
             return true;
         }
 
+        if user_silent {
+            // if the user is silent, then we need to request the full
+            // buffer, even if no period shift has occurred
+            return true;
+        }
+
         let current_period = self.buffer_duration().as_millis() / AUTO_TRANSCRIPTION_PERIOD_MS;
 
         last_period != current_period
     }
 
-    pub fn make_transcription_request(&mut self) -> Option<(Bytes, Duration, SystemTime)> {
-        if !self.is_ready_for_transcription() {
+    pub fn make_transcription_request(
+        &mut self,
+        user_silent: bool,
+    ) -> Option<(Bytes, Duration, SystemTime)> {
+        if !self.is_ready_for_transcription(user_silent) {
             return None;
         }
         if let Some((_, start_time)) = self.start_time {

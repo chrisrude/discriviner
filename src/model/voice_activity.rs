@@ -18,7 +18,7 @@ pub(crate) struct VoiceActivity {
     silence_list: VecDeque<(Instant, UserId, Instant)>,
     speaking_users: collections::HashSet<UserId>,
     tx_api_events: sync::mpsc::UnboundedSender<VoiceChannelEvent>,
-    tx_silent_user_events: sync::mpsc::UnboundedSender<UserId>,
+    tx_silent_user_events: sync::mpsc::UnboundedSender<(UserId, bool)>,
     user_silence_timeout: Duration,
 }
 
@@ -37,7 +37,7 @@ impl VoiceActivity {
         rx_voice_activity: sync::mpsc::UnboundedReceiver<VoiceActivityData>,
         shutdown_token: CancellationToken,
         tx_api_events: sync::mpsc::UnboundedSender<VoiceChannelEvent>,
-        tx_silent_user_events: sync::mpsc::UnboundedSender<UserId>,
+        tx_silent_user_events: sync::mpsc::UnboundedSender<(UserId, bool)>,
         user_silence_timeout: Duration,
     ) -> task::JoinHandle<()> {
         let mut voice_activity = Self {
@@ -102,6 +102,14 @@ impl VoiceActivity {
                             ).unwrap();
                         }
                     }
+
+                    // forward on silent user events.  These will be used
+                    // to eagerly kick off transcriptions.
+                    // todo: use the general event channel instead?
+                    if !activity.speaking {
+                        self.tx_silent_user_events.send((activity.user_id, false)).unwrap();
+                    }
+
                 }
                 () = time::sleep_until(
                     self.silence_list.get(0).unwrap_or(&noop_time).0
@@ -118,7 +126,7 @@ impl VoiceActivity {
                         if let Some((speaking, last_time_actual)) = self.last_time_by_user.get(&user_id) {
                             if !*speaking && last_time == *last_time_actual {
                                 // user has been silent the whole time
-                                self.tx_silent_user_events.send(user_id).unwrap();
+                                self.tx_silent_user_events.send((user_id, true)).unwrap();
                             }
                         }
                     }
@@ -183,7 +191,11 @@ mod tests {
             speaking: false,
         })
         .unwrap();
-        assert_eq!(rx_silent_user.recv().await.unwrap(), 1);
+
+        tokio::time::sleep(Duration::from_millis(2)).await;
+
+        assert_eq!(Ok((1, false)), rx_silent_user.try_recv());
+        assert_eq!(rx_silent_user.recv().await.unwrap(), (1, true));
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
         assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 
@@ -194,12 +206,15 @@ mod tests {
         })
         .unwrap();
 
+        tokio::time::sleep(Duration::from_millis(2)).await;
+
+        assert_eq!(Ok((2, false)), rx_silent_user.try_recv());
         if let VoiceChannelEvent::ChannelSilent(silent) = rx_silent_channel.recv().await.unwrap() {
             assert!(silent);
         } else {
             panic!("expected silent channel event");
         }
-        assert_eq!(rx_silent_user.recv().await.unwrap(), 2);
+        assert_eq!(rx_silent_user.recv().await.unwrap(), (2, true));
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
         assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 
@@ -255,14 +270,18 @@ mod tests {
             speaking: false,
         })
         .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(2)).await;
+
         // we should NOT have sent a silent user timeout
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
+        assert_eq!(Ok((1, false)), rx_silent_user.try_recv());
         assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 
         // now wait a while, and expect a timeout
         tokio::time::sleep(Duration::from_millis(20)).await;
 
-        assert_eq!(rx_silent_user.recv().await.unwrap(), 1);
+        assert_eq!(rx_silent_user.recv().await.unwrap(), (1, true));
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
         assert_eq!(Err(TryRecvError::Empty), rx_silent_user.try_recv());
 
@@ -272,6 +291,9 @@ mod tests {
             speaking: false,
         })
         .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(2)).await;
+        assert_eq!(Ok((2, false)), rx_silent_user.try_recv());
 
         // we should NOT have fired a timeout for user 2 yet
         if let VoiceChannelEvent::ChannelSilent(silent) = rx_silent_channel.recv().await.unwrap() {

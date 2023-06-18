@@ -33,6 +33,10 @@ pub(crate) struct UserAudio {
 
     /// User ID of the user that this buffer is for.
     pub user_id: UserId,
+
+    /// If true, the user is not speaking at this instant.
+    /// (though they may had been speaking an instant ago)
+    pub user_silent: bool,
 }
 
 impl UserAudio {
@@ -41,6 +45,7 @@ impl UserAudio {
             slices: vec![AudioSlice::new(), AudioSlice::new()],
             last_tokens: VecDeque::with_capacity(TOKENS_TO_KEEP),
             user_id,
+            user_silent: false,
         }
     }
 
@@ -51,6 +56,7 @@ impl UserAudio {
     ) {
         // find a slice that will take the audio, and add it.
         // create a new slice if necessary.
+        self.user_silent = false;
 
         let slice = if let Some(slice) = self
             .slices
@@ -67,7 +73,8 @@ impl UserAudio {
         slice.add_audio(rtc_timestamp, discord_audio);
     }
 
-    pub fn handle_user_silence(&mut self) -> impl Iterator<Item = Transcription> {
+    pub fn handle_user_inactive(&mut self) -> impl Iterator<Item = Transcription> {
+        assert!(self.user_silent);
         let now = std::time::SystemTime::now();
         // finalize all slices that have a finalize timestamp
         // that is older than now.
@@ -85,6 +92,11 @@ impl UserAudio {
             self.add_tokens(message);
         }
         result.into_iter()
+    }
+
+    pub fn set_silent(&mut self) {
+        assert!(!self.user_silent);
+        self.user_silent = true;
     }
 
     fn add_tokens(&mut self, message: &Transcription) {
@@ -127,7 +139,7 @@ impl UserAudio {
     pub fn try_get_transcription_requests(&mut self) -> impl Iterator<Item = TranscriptionRequest> {
         self.slices
             .iter_mut()
-            .filter_map(|s| s.make_transcription_request())
+            .filter_map(|s| s.make_transcription_request(self.user_silent))
             .map(
                 |(audio_data, audio_duration, start_timestamp)| TranscriptionRequest {
                     audio_data,

@@ -47,7 +47,7 @@ impl Discrivener {
         let (tx_api_events, rx_api_events) =
             tokio::sync::mpsc::unbounded_channel::<VoiceChannelEvent>();
         let (tx_silent_user_events, rx_silent_user_events) =
-            tokio::sync::mpsc::unbounded_channel::<u64>();
+            tokio::sync::mpsc::unbounded_channel::<(u64, bool)>();
         let (tx_voice_activity, rx_voice_activity) =
             tokio::sync::mpsc::unbounded_channel::<VoiceActivityData>();
 

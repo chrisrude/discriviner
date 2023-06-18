@@ -37,9 +37,10 @@ pub(crate) struct AudioManager {
     rx_audio_data: sync::mpsc::UnboundedReceiver<DiscordAudioData>,
 
     // this queue is used to notify the audio buffer manager that
-    // a user has stopped talking.  We'll use this to know when
+    // a user's speech has become idle -- aka, USER_SILENCE_TIMEOUT_MS
+    // has passed since the last audio data.  We'll use this to know when
     // to trigger our final transcription.
-    rx_silent_user_events: sync::mpsc::UnboundedReceiver<types::UserId>,
+    rx_silent_user_events: sync::mpsc::UnboundedReceiver<(types::UserId, bool)>,
 
     // this is used to signal the audio buffer manager to shut down.
     shutdown_token: CancellationToken,
@@ -48,7 +49,7 @@ pub(crate) struct AudioManager {
 impl<'a> AudioManager {
     pub fn monitor(
         rx_audio_data: sync::mpsc::UnboundedReceiver<DiscordAudioData>,
-        rx_silent_user_events: sync::mpsc::UnboundedReceiver<types::UserId>,
+        rx_silent_user_events: sync::mpsc::UnboundedReceiver<(types::UserId, bool)>,
         shutdown_token: CancellationToken,
         tx_api: sync::mpsc::UnboundedSender<VoiceChannelEvent>,
         whisper: Whisper,
@@ -128,21 +129,23 @@ impl<'a> AudioManager {
                         )
                     });
                 }
-                // todo: also handle a user stops speaking (but no timeout)
-                //       event here
-                Some(user_id) = self.rx_silent_user_events.recv() => {
+                Some((user_id, inactive)) = self.rx_silent_user_events.recv() => {
                     // this user has stopped talking for long enough, see if
                     // we have any audio left to finalize
                     self.with_buffer_for_user(user_id, |buffer| {
                         eprintln!("user {:?} has stopped talking", user_id);
-                        let transcripts = buffer.handle_user_silence();
-                        for transcript in transcripts {
-                            eprintln!("sending transcription to API: {:?}", transcript.text());
-                            tx_api
-                            .send(VoiceChannelEvent::Transcription(
-                                transcript,
-                            ))
-                            .unwrap();
+                        if inactive {
+                            let transcripts = buffer.handle_user_inactive();
+                            for transcript in transcripts {
+                                eprintln!("sending transcription to API: {:?}", transcript.text());
+                                tx_api
+                                .send(VoiceChannelEvent::Transcription(
+                                    transcript,
+                                ))
+                                .unwrap();
+                            }
+                        } else {
+                            buffer.set_silent();
                         }
                         Self::maybe_request_transcription(
                             &whisper,
