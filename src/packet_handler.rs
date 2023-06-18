@@ -19,7 +19,6 @@ use crate::model::types::ConnectData;
 use crate::model::types::DisconnectData;
 use crate::model::types::DiscordAudioSample;
 use crate::model::types::DiscordRtcTimestamp;
-use crate::model::types::UserJoinData;
 use crate::model::types::VoiceChannelEvent;
 
 pub(crate) struct PacketHandler {
@@ -51,10 +50,7 @@ impl PacketHandler {
             self.ssrc_to_user_id.write().unwrap().insert(ssrc, user_id);
         }
         self.tx_api_events
-            .send(VoiceChannelEvent::UserJoin(UserJoinData {
-                user_id,
-                joined: true,
-            }))
+            .send(VoiceChannelEvent::UserJoin(user_id))
             .unwrap();
     }
 
@@ -110,10 +106,7 @@ impl PacketHandler {
         // for this user after they leave, so we don't want to
         // remove them from the map just yet.
         self.tx_api_events
-            .send(VoiceChannelEvent::UserJoin(UserJoinData {
-                user_id,
-                joined: false,
-            }))
+            .send(VoiceChannelEvent::UserLeave(user_id))
             .unwrap();
     }
 

@@ -56,16 +56,11 @@ async fn tokio_main(cli: Cli) {
                     }
                 )
             }
-            VoiceChannelEvent::UserJoin(user_data) => {
-                println!(
-                    "User {} {}",
-                    user_data.user_id,
-                    if user_data.joined {
-                        "joined".bright_green()
-                    } else {
-                        "left".bright_purple()
-                    }
-                )
+            VoiceChannelEvent::UserJoin(user_id) => {
+                println!("User joined:  {}", user_id,)
+            }
+            VoiceChannelEvent::UserLeave(user_id) => {
+                println!("User left:  {}", user_id,)
             }
             VoiceChannelEvent::Reconnect(status) => {
                 println!(

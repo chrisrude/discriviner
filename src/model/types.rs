@@ -20,14 +20,6 @@ pub(crate) type WhisperAudioSample = f32;
 // as JSON
 
 #[serde_as]
-#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, Serialize, Deserialize)]
-pub struct UserJoinData {
-    /// Sent when a user joins or leaves.
-    pub user_id: u64,
-    pub joined: bool,
-}
-
-#[serde_as]
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize)]
 pub struct Transcription {
     /// absolute time this message was received,
@@ -171,7 +163,8 @@ pub struct DisconnectData {
 
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize)]
 pub enum VoiceChannelEvent {
-    UserJoin(UserJoinData),
+    UserJoin(UserId),
+    UserLeave(UserId),
     Connect(ConnectData),
     Reconnect(ConnectData),
     Disconnect(DisconnectData),

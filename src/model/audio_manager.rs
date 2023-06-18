@@ -134,6 +134,7 @@ impl<'a> AudioManager {
                     // this user has stopped talking for long enough, see if
                     // we have any audio left to finalize
                     self.with_buffer_for_user(user_id, |buffer| {
+                        eprintln!("user {:?} has stopped talking", user_id);
                         let transcripts = buffer.handle_user_silence();
                         for transcript in transcripts {
                             eprintln!("sending transcription to API: {:?}", transcript.text());
@@ -154,6 +155,8 @@ impl<'a> AudioManager {
                     // we got a transcription response, determine if it's a final transcription
                     // and if so send it to the API
                     self.with_buffer_for_user(transcription_response.0.user_id, |buffer| {
+                        eprintln!("user {:?} has transcription response", transcription_response.0.user_id);
+
                         let transcript_opt = buffer.handle_transcription_response(&transcription_response.0);
                         if let Some(transcript) = transcript_opt {
                             eprintln!("sending transcription to API: {:?}", transcript.text());
