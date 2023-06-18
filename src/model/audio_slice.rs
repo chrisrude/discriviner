@@ -117,15 +117,14 @@ impl AudioSlice {
             let timeout = duration_to_rtc(&AUDIO_TO_RECORD);
             let end = current_end + timeout;
 
-            let result;
-            if start_rtc < end {
-                result = rtc_timestamp >= start_rtc && rtc_timestamp < end
+            let result = if start_rtc < end {
+                rtc_timestamp >= start_rtc && rtc_timestamp < end
             } else {
                 // if the slice wraps around, then we need to check
                 // if the timestamp is either before the end or after
                 // the start.
-                result = rtc_timestamp < end || rtc_timestamp >= start_rtc
-            }
+                rtc_timestamp < end || rtc_timestamp >= start_rtc
+            };
 
             if !result {
                 eprintln!(
@@ -281,7 +280,9 @@ impl AudioSlice {
                 final_request: self.finalized,
             };
             if let Some(last_request) = self.last_request.as_ref() {
-                if last_request.start_time == new_request.start_time && last_request.original_duration == new_request.original_duration {
+                if last_request.start_time == new_request.start_time
+                    && last_request.original_duration == new_request.original_duration
+                {
                     eprintln!("{}: discarding duplicate request", self.slice_id);
                     // if this is our final request, make sure the last request
                     // has the final flag set
