@@ -58,7 +58,7 @@ pub(crate) struct AudioSlice {
     pub finalized: bool,
     pub last_request: Option<Duration>,
     pub start_time: Option<(DiscordRtcTimestamp, SystemTime)>,
-    pub tentative_transcription: Option<(Duration, Option<Transcription>)>,
+    pub tentative_transcript_opt: Option<Transcription>,
 }
 
 impl AudioSlice {
@@ -68,7 +68,7 @@ impl AudioSlice {
             finalized: false,
             last_request: None,
             start_time: None,
-            tentative_transcription: None,
+            tentative_transcript_opt: None,
         }
     }
 
@@ -78,7 +78,7 @@ impl AudioSlice {
         self.finalized = false;
         self.last_request = None;
         self.start_time = None;
-        self.tentative_transcription = None;
+        self.tentative_transcript_opt = None;
     }
 
     /// True if the given timestamp is within the bounds of this slice.
@@ -133,7 +133,15 @@ impl AudioSlice {
         if let Some((start_rtc, _)) = self.start_time {
             // padding is the difference between the current end time
             // and the start of the new audio
-            padding = rtc_timestamp_to_index(start_rtc, rtc_timestamp) - self.audio.len();
+            eprintln!(
+                "rtc timestamp: {}... start {}",
+                rtc_timestamp,
+                self.start_time.unwrap().0
+            );
+            let rtc_idx = rtc_timestamp_to_index(start_rtc, rtc_timestamp);
+            eprintln!("rtc index: {}", rtc_idx);
+            eprintln!("audio len: {}", self.audio.len());
+            padding = rtc_idx - self.audio.len();
         } else {
             // this is the first audio for the slice, so we need to set
             // the start time
@@ -159,12 +167,12 @@ impl AudioSlice {
                 .extend(iter::repeat(WhisperAudioSample::default()).take(padding));
         }
 
-        if self.tentative_transcription.is_some() {
+        if self.tentative_transcript_opt.is_some() {
             eprintln!("discarding tentative transcription");
         }
 
         // since more audio has come in, discard the tentative transcription
-        self.tentative_transcription = None;
+        self.tentative_transcript_opt = None;
 
         self.resample_audio_from_discord_to_whisper(discord_audio);
 
@@ -277,29 +285,28 @@ impl AudioSlice {
             self.buffer_duration().as_millis()
         );
 
-        self.tentative_transcription.as_ref()?;
+        if self.tentative_transcript_opt.is_none() {
+            // if we don't have a tentative transcription, then
+            // we can't return anything
+            eprintln!("no tentative transcription in finalize, returning None");
+            return None;
+        }
 
-        let (duration, mut transcription_opt) = self.tentative_transcription.take().unwrap();
+        let tentative_transcript = self.tentative_transcript_opt.take().unwrap();
 
         eprintln!(
             "tentative description has {} segments, covering {} ms",
-            transcription_opt
-                .as_ref()
-                .map(|x| x.segments.len())
-                .unwrap_or(0),
-            transcription_opt
-                .as_ref()
-                .map(|x| x.audio_duration.as_millis())
-                .unwrap_or(0),
+            tentative_transcript.segments.len(),
+            tentative_transcript.audio_duration.as_millis(),
         );
 
         // if we had a tentative transcription, return it.
         // We know that it's current, since if we had gathered
         // more audio, we would have discarded it.
-        assert!(duration == self.buffer_duration());
+        assert!(tentative_transcript.audio_duration == self.buffer_duration());
         self.clear();
 
-        transcription_opt.take()
+        Some(tentative_transcript)
     }
 
     pub fn buffer_duration(&self) -> Duration {
@@ -325,68 +332,44 @@ impl AudioSlice {
         // but only if we haven't seen new audio since the response was generated.
 
         if let Some(end_time) = self.finalize_timestamp() {
-            let (finalized_opt, tentative_opt) =
+            let (finalized_transcript, tentative_transcript) =
                 Transcription::split_at_end_time(message, end_time);
             if self.finalized {
-                assert!(tentative_opt.is_none());
+                assert!(tentative_transcript.is_empty());
             }
-            let time1 = tentative_opt
-                .as_ref()
-                .map(|x| x.audio_duration.as_millis())
-                .unwrap_or(0);
-            let time2 = finalized_opt
-                .as_ref()
-                .map(|x| x.audio_duration.as_millis())
-                .unwrap_or(0);
-            assert_eq!(time1 + time2, message.audio_duration.as_millis());
+            assert_eq!(
+                finalized_transcript.audio_duration + tentative_transcript.audio_duration,
+                message.audio_duration
+            );
 
             eprintln!(
                 "have transcription: {} final segments ({} ms), {} tentative segments ({} ms)",
-                finalized_opt
-                    .as_ref()
-                    .map(|x| x.segments.len())
-                    .unwrap_or(0),
-                finalized_opt
-                    .as_ref()
-                    .map(|x| x.audio_duration.as_millis())
-                    .unwrap_or(0),
-                tentative_opt
-                    .as_ref()
-                    .map(|x| x.segments.len())
-                    .unwrap_or(0),
-                tentative_opt
-                    .as_ref()
-                    .map(|x| x.audio_duration.as_millis())
-                    .unwrap_or(0),
+                finalized_transcript.segments.len(),
+                finalized_transcript.audio_duration.as_millis(),
+                tentative_transcript.segments.len(),
+                tentative_transcript.audio_duration.as_millis(),
             );
-            if let Some(finalized) = finalized_opt.as_ref() {
-                eprintln!("finalized transcription: '{}'", finalized.text(),);
-            }
-            if let Some(tentative) = tentative_opt.as_ref() {
-                eprintln!("tentative transcription: '{}'", tentative.text(),);
-            }
-
-            // if the current buffer duration matches the
-            // duration in the passed-in transcription, then
-            // store whatever we have as tentative.  We can't
-            // look at the tentative transcription, since it
-            // will be None if it contains no words.
-            //
-            // only store the tentative transcription if it covers
-            // all the audio currently in the buffer
-            if self.buffer_duration() == message.audio_duration {
-                self.tentative_transcription = Some((message.audio_duration, tentative_opt));
-            }
+            eprintln!("finalized transcription: '{}'", finalized_transcript.text(),);
+            eprintln!("tentative transcription: '{}'", tentative_transcript.text(),);
 
             // with our finalized transcription, we can now discard
             // the audio that was used to generate it.  Be sure to
             // only discard exactly as much audio as was represented
             // by the finalized transcription, or the times will not line up.
-            if let Some(finalized) = finalized_opt.clone() {
-                self.discard_audio(&finalized.audio_duration);
+            self.discard_audio(&finalized_transcript.audio_duration);
+
+            // if the remaining audio length is the same as the tentative
+            // transcription, that means no new audio has arrived in the
+            // meantime, so we can keep the tentative transcription.
+            if self.buffer_duration() == tentative_transcript.audio_duration {
+                eprintln!("keeping tentative transcription");
+                self.tentative_transcript_opt = Some(tentative_transcript);
+            } else {
+                eprintln!("discarding tentative transcription");
+                self.tentative_transcript_opt = None;
             }
 
-            finalized_opt
+            Some(finalized_transcript)
         } else {
             None
         }

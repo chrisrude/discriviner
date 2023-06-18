@@ -237,19 +237,20 @@ impl TextSegment {
 }
 
 impl Transcription {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.segments.is_empty()
+    }
+
     /// Splits the Transcription into two separate messages.
     /// The first message will contain all segments that end before the given end_time.
     /// The second message will contain all segments that end at or after the given end_time.
     ///
     /// If there are no segments that end before the given end_time, the first message
-    /// will be None.  If there aer no segments that end after the given end_time,
-    /// the second message will be None.
+    /// will return true for .is_empty().  Same for the second message.
     ///
-    /// If there are no segments in the provided message at all, both messages will be None.
-    pub(crate) fn split_at_end_time(
-        message: &Transcription,
-        end_time: SystemTime,
-    ) -> (Option<Self>, Option<Self>) {
+    /// If there are no segments in the provided message at all, both messages
+    /// will be .is_empty().
+    pub(crate) fn split_at_end_time(message: &Transcription, end_time: SystemTime) -> (Self, Self) {
         let fn_first_half = |segment: &TextSegment| {
             message.start_timestamp + Duration::from_millis(segment.end_offset_ms as u64)
                 <= end_time
@@ -263,44 +264,41 @@ impl Transcription {
                 second_segments.push(segment.clone());
             }
         }
-        let (first, first_duration) = if first_segments.is_empty() {
-            (None, Duration::ZERO)
-        } else {
-            let duration = first_segments
-                .iter()
-                .map(|segment| Duration::from_millis(segment.end_offset_ms as u64))
-                .max()
-                .unwrap();
-            (
-                Some(Self {
-                    segments: first_segments,
-                    start_timestamp: message.start_timestamp,
-                    user_id: message.user_id,
-                    audio_duration: duration,
-                    processing_time: message.processing_time,
-                }),
-                duration,
-            )
-        };
-        let second = if second_segments.is_empty() {
-            None
-        } else {
-            // for all the second segments, remove the amount of time chopped
-            // off the beginning of the message
-            for segment in &mut second_segments {
-                segment.start_offset_ms -= first_duration.as_millis() as u32;
-                segment.end_offset_ms -= first_duration.as_millis() as u32;
-            }
-            Some(Self {
-                segments: second_segments,
-                start_timestamp: message.start_timestamp + first_duration,
-                user_id: message.user_id,
-                audio_duration: message.audio_duration - first_duration,
-                processing_time: Duration::from_millis(1),
-            })
+
+        eprintln!("first_segments: {:?}", first_segments);
+
+        let first_duration = first_segments
+            .iter()
+            .map(|segment| Duration::from_millis(segment.end_offset_ms as u64))
+            .max()
+            .unwrap_or(Duration::ZERO);
+
+        let first_transcript = Self {
+            segments: first_segments,
+            start_timestamp: message.start_timestamp,
+            user_id: message.user_id,
+            audio_duration: first_duration,
+            processing_time: message.processing_time,
         };
 
-        (first, second)
+        let second_duration = message.audio_duration - first_duration;
+
+        // for all the second segments, remove the amount of time chopped
+        // off the beginning of the message
+        for segment in &mut second_segments {
+            segment.start_offset_ms -= first_duration.as_millis() as u32;
+            segment.end_offset_ms -= first_duration.as_millis() as u32;
+        }
+
+        let second_transcript = Self {
+            segments: second_segments,
+            start_timestamp: message.start_timestamp + first_duration,
+            user_id: message.user_id,
+            audio_duration: second_duration,
+            processing_time: Duration::from_millis(1),
+        };
+
+        (first_transcript, second_transcript)
     }
 
     pub(crate) fn text(&self) -> String {
@@ -351,9 +349,7 @@ mod tests {
             &message,
             SystemTime::UNIX_EPOCH + Duration::from_secs(1),
         );
-        let first = first.unwrap();
         let first_segments = first.segments;
-        let second = second.unwrap();
         let second_segments = second.segments;
         assert_eq!(first_segments.len(), 1);
         assert_eq!(second_segments.len(), 1);
