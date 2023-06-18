@@ -100,6 +100,10 @@ impl Whisper {
             }
             let start_offset_ms = 10 * state.full_get_segment_t0(i).unwrap() as u32;
             let end_offset_ms = 10 * state.full_get_segment_t1(i).unwrap() as u32;
+            eprintln!(
+                "Segment {} is {}ms to {}ms",
+                i, start_offset_ms, end_offset_ms
+            );
             segments.push(TextSegment {
                 start_offset_ms,
                 end_offset_ms,

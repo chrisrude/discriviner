@@ -4,6 +4,7 @@
 use std::time::Duration;
 
 pub(crate) const AUDIO_TO_RECORD_SECONDS: usize = 30;
+pub(crate) const AUDIO_TO_RECORD: Duration = Duration::from_secs(AUDIO_TO_RECORD_SECONDS as u64);
 
 pub(crate) const AUTO_TRANSCRIPTION_PERIOD_MS: u128 = 5000;
 
@@ -11,7 +12,7 @@ pub(crate) const AUTO_TRANSCRIPTION_PERIOD_MS: u128 = 5000;
 /// use them to seed the next transcription.  This is per-user.
 pub(crate) const TOKENS_TO_KEEP: usize = 1024;
 
-pub(crate) const USER_SILENCE_TIMEOUT_MS: usize = 2000;
+pub(crate) const USER_SILENCE_TIMEOUT_MS: usize = 1000;
 pub(crate) const USER_SILENCE_TIMEOUT: Duration =
     Duration::from_millis(USER_SILENCE_TIMEOUT_MS as u64);
 

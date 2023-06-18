@@ -1,5 +1,5 @@
 use std::{
-    cmp::min,
+    cmp::{max, min},
     num::Wrapping,
     time::{Duration, SystemTime},
 };
@@ -251,12 +251,15 @@ impl Transcription {
     ///
     /// If there are no segments in the provided message at all, both messages
     /// will be .is_empty().
-    pub(crate) fn split_at_end_time(message: &Transcription, end_time: SystemTime) -> (Self, Self) {
+    pub(crate) fn split_at_end_time(
+        message: &Transcription,
+        end_time_desired: SystemTime,
+    ) -> (Self, Self) {
+        let end_time = max(end_time_desired, message.start_timestamp);
         let fn_first_half = |segment: &TextSegment| {
             message.start_timestamp + Duration::from_millis(segment.end_offset_ms as u64)
                 <= end_time
         };
-        assert!(end_time >= message.start_timestamp);
         let mut first_segments = vec![];
         let mut second_segments = vec![];
         for segment in message.segments.iter() {

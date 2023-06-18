@@ -7,7 +7,10 @@ use std::{
 use bytes::Bytes;
 
 use super::{
-    constants::{AUDIO_TO_RECORD_SECONDS, AUTO_TRANSCRIPTION_PERIOD_MS, USER_SILENCE_TIMEOUT},
+    constants::{
+        AUDIO_TO_RECORD, AUDIO_TO_RECORD_SECONDS, AUTO_TRANSCRIPTION_PERIOD_MS,
+        USER_SILENCE_TIMEOUT,
+    },
     types::{
         self, DiscordAudioSample, DiscordRtcTimestamp, DiscordRtcTimestampInner, Transcription,
         WhisperAudioSample,
@@ -54,12 +57,13 @@ fn samples_to_duration(num_samples: usize) -> u64 {
     (num_samples / WHISPER_SAMPLES_PER_MILLISECOND) as u64
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct LastRequestInfo {
     pub start_time: SystemTime,
     pub original_duration: Duration,
     pub audio_trimmed_since_request: Duration,
     pub in_progress: bool,
+    pub requested_at: SystemTime,
+    pub final_request: bool,
 }
 
 impl LastRequestInfo {
@@ -107,8 +111,10 @@ impl AudioSlice {
         if let Some((start_rtc, _)) = self.start_time {
             let current_end = start_rtc + duration_to_rtc(&self.buffer_duration());
 
-            // add end_timeout to end
-            let timeout = duration_to_rtc(&USER_SILENCE_TIMEOUT);
+            // add end of buffer
+            // note: this will ignore the size of the audio we're looking to
+            // add, but that's ok
+            let timeout = duration_to_rtc(&AUDIO_TO_RECORD);
             let end = current_end + timeout;
 
             let result;
@@ -218,20 +224,20 @@ impl AudioSlice {
             return true;
         }
 
-        if user_silent {
-            // if the user is silent, then we need to request the full
-            // buffer, even if no period shift has occurred
-            // in this case we'll have two outstanding transcription
-            // requests...
-            return true;
-        }
-
         if let Some(last_request) = self.last_request.as_ref() {
             if last_request.in_progress {
                 // we already have a pending request, so we don't need to
                 // make another one
                 return false;
             }
+        }
+
+        if user_silent {
+            // if the user is silent, then we need to request the full
+            // buffer, even if no period shift has occurred
+            // in this case we'll have two outstanding transcription
+            // requests...
+            return true;
         }
 
         let current_period = self.buffer_duration().as_millis() / AUTO_TRANSCRIPTION_PERIOD_MS;
@@ -271,11 +277,20 @@ impl AudioSlice {
                 audio_trimmed_since_request: Duration::ZERO,
                 original_duration: self.buffer_duration(),
                 in_progress: true,
+                requested_at: SystemTime::now(),
+                final_request: self.finalized,
             };
             if let Some(last_request) = self.last_request.as_ref() {
-                if last_request == &new_request {
-                    eprintln!("{}: discarding duplicate request", self.slice_id);
-                    return None;
+                if last_request.start_time == new_request.start_time {
+                    if last_request.original_duration == new_request.original_duration {
+                        eprintln!("{}: discarding duplicate request", self.slice_id);
+                        // if this is our final request, make sure the last request
+                        // has the final flag set
+                        if new_request.final_request {
+                            self.last_request.as_mut().unwrap().final_request = true;
+                        }
+                        return None;
+                    }
                 }
                 if last_request.in_progress {
                     eprintln!("{}: discarding previous in-progress request", self.slice_id);
@@ -350,7 +365,14 @@ impl AudioSlice {
         // if we had a tentative transcription, return it.
         // We know that it's current, since if we had gathered
         // more audio, we would have discarded it.
-        assert!(tentative_transcript.audio_duration == self.buffer_duration());
+        if tentative_transcript.audio_duration != self.buffer_duration() {
+            eprintln!(
+                "tentative transcription duration {} != buffer duration {}",
+                tentative_transcript.audio_duration.as_millis(),
+                self.buffer_duration().as_millis()
+            );
+            return None;
+        }
         self.clear();
 
         Some(tentative_transcript)
@@ -360,95 +382,98 @@ impl AudioSlice {
         Duration::from_millis(samples_to_duration(self.audio.len()))
     }
 
-    pub fn finalize_timestamp(&self) -> Option<SystemTime> {
-        if let Some((_, start_time)) = self.start_time {
-            Some(start_time + self.buffer_duration() + USER_SILENCE_TIMEOUT)
-        } else {
-            None
-        }
-    }
-
     pub fn handle_transcription_response(
         &mut self,
         message: &Transcription,
     ) -> Option<Transcription> {
+        // if we had more than one request in flight, we need to
+        // ignore all but the latest
+        if let Some(last_request) = self.last_request.as_ref() {
+            if last_request.start_time != message.start_timestamp {
+                eprintln!(
+                    "ignoring transcription response with start time {:?} (expected {:?})",
+                    message.start_timestamp, last_request.start_time
+                );
+                return None;
+            }
+            if message.audio_duration != last_request.original_duration {
+                eprintln!(
+                    "ignoring transcription response with duration {:?} (expected {:?})",
+                    message.audio_duration, last_request.original_duration
+                );
+                return None;
+            }
+        } else {
+            // this can happen if we've cleared the buffer but had
+            // an outstanding transcription request
+            eprintln!("ignoring transcription response with no last request");
+            return None;
+        }
+        self.last_request.as_mut().unwrap().in_progress = false;
+
         // figure out how many segments have an end time that's more
         // than USER_SILENCE_TIMEOUT ago.  Those will be returned to
         // the caller in a Transcription.
         // The remainder, if any, will be kept in tentative_transcription,
         // but only if we haven't seen new audio since the response was generated.
 
-        if let Some(end_time) = self.finalize_timestamp() {
-            let (finalized_transcript, tentative_transcript) =
-                Transcription::split_at_end_time(message, end_time);
-            if self.finalized {
-                assert!(tentative_transcript.is_empty());
-            }
-            assert_eq!(
-                finalized_transcript.audio_duration + tentative_transcript.audio_duration,
-                message.audio_duration
-            );
-            assert!(self.last_request.is_some());
-            assert!(self.last_request.as_ref().unwrap().in_progress);
-            // if we had more than one request in flight, we need to
-            // ignore all but the latest
-            if let Some(last_request) = self.last_request.as_ref() {
-                if last_request.start_time != message.start_timestamp {
-                    eprintln!(
-                        "ignoring transcription response with start time {:?} (expected {:?})",
-                        message.start_timestamp, last_request.start_time
-                    );
-                    return None;
-                }
-                if message.audio_duration < last_request.original_duration {
-                    eprintln!(
-                        "ignoring transcription response with duration {:?} (expected {:?})",
-                        message.audio_duration, last_request.original_duration
-                    );
-                    return None;
-                }
-            }
-            assert_eq!(
-                self.last_request.as_ref().unwrap().original_duration,
-                message.audio_duration
-            );
-            self.last_request.as_mut().unwrap().in_progress = false;
-
-            eprintln!(
-                "have transcription: {} final segments ({} ms), {} tentative segments ({} ms)",
-                finalized_transcript.segments.len(),
-                finalized_transcript.audio_duration.as_millis(),
-                tentative_transcript.segments.len(),
-                tentative_transcript.audio_duration.as_millis(),
-            );
-
-            // eprintln!("finalized transcription: '{}'", finalized_transcript.text(),);
-            // eprintln!("tentative transcription: '{}'", tentative_transcript.text(),);
-
-            // with our finalized transcription, we can now discard
-            // the audio that was used to generate it.  Be sure to
-            // only discard exactly as much audio as was represented
-            // by the finalized transcription, or the times will not line up.
-            self.discard_audio(&finalized_transcript.audio_duration);
-
-            // if the remaining audio length is the same as the tentative
-            // transcription, that means no new audio has arrived in the
-            // meantime, so we can keep the tentative transcription.
-            if self.buffer_duration() == tentative_transcript.audio_duration {
-                // eprintln!("keeping tentative transcription");
-                self.tentative_transcript_opt = Some(tentative_transcript);
-            } else {
-                // eprintln!("discarding tentative transcription");
-                self.tentative_transcript_opt = None;
-            }
-
-            if finalized_transcript.is_empty() {
-                None
-            } else {
-                Some(finalized_transcript)
-            }
+        let end_time = if self.last_request.as_ref().unwrap().final_request {
+            // if this is the final request, then we want to keep all
+            // segments
+            SystemTime::now() + Duration::from_secs(1000)
         } else {
+            self.last_request.as_ref().unwrap().requested_at - USER_SILENCE_TIMEOUT
+        };
+        let (finalized_transcript, tentative_transcript) =
+            Transcription::split_at_end_time(message, end_time);
+        // if self.finalized {
+        //     assert!(tentative_transcript.is_empty());
+        // }
+        assert_eq!(
+            finalized_transcript.audio_duration + tentative_transcript.audio_duration,
+            message.audio_duration
+        );
+        // todo: check to see if the tentative transcription is accurate
+
+        eprintln!(
+            "have transcription: {} final segments ({} ms), {} tentative segments ({} ms)",
+            finalized_transcript.segments.len(),
+            finalized_transcript.audio_duration.as_millis(),
+            tentative_transcript.segments.len(),
+            tentative_transcript.audio_duration.as_millis(),
+        );
+
+        // eprintln!("finalized transcription: '{}'", finalized_transcript.text(),);
+        // eprintln!("tentative transcription: '{}'", tentative_transcript.text(),);
+
+        // with our finalized transcription, we can now discard
+        // the audio that was used to generate it.  Be sure to
+        // only discard exactly as much audio as was represented
+        // by the finalized transcription, or the times will not line up.
+        self.discard_audio(&finalized_transcript.audio_duration);
+
+        // if the remaining audio length is the same as the tentative
+        // transcription, that means no new audio has arrived in the
+        // meantime, so we can keep the tentative transcription.
+        eprintln!(
+            "tentative transcription with {} segments ({} ms): '{}'",
+            tentative_transcript.segments.len(),
+            tentative_transcript.audio_duration.as_millis(),
+            tentative_transcript.text(),
+        );
+
+        if self.buffer_duration() == tentative_transcript.audio_duration {
+            eprintln!("keeping tentative transcription");
+            self.tentative_transcript_opt = Some(tentative_transcript);
+        } else {
+            eprintln!("discarding tentative transcription");
+            self.tentative_transcript_opt = None;
+        }
+
+        if finalized_transcript.is_empty() {
             None
+        } else {
+            Some(finalized_transcript)
         }
     }
 }
