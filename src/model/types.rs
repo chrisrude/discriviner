@@ -265,7 +265,7 @@ impl Transcription {
             }
         }
 
-        eprintln!("first_segments: {:?}", first_segments);
+        // eprintln!("first_segments: {:?}", first_segments);
 
         let first_duration = first_segments
             .iter()

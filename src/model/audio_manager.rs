@@ -154,13 +154,13 @@ impl<'a> AudioManager {
                         )
                     });
                 }
-                Ok(Some(transcription_response)) = pending_transcription_requests.try_next() => {
+                Ok(Some(TranscriptionResponse{ slice_id, transcript })) = pending_transcription_requests.try_next() => {
                     // we got a transcription response, determine if it's a final transcription
                     // and if so send it to the API
-                    self.with_buffer_for_user(transcription_response.0.user_id, |buffer| {
-                        eprintln!("user {:?} has transcription response", transcription_response.0.user_id);
+                    self.with_buffer_for_user(transcript.user_id, |buffer| {
+                        eprintln!("user {:?} has transcription response", transcript.user_id);
 
-                        let transcript_opt = buffer.handle_transcription_response(&transcription_response.0);
+                        let transcript_opt = buffer.handle_transcription_response(&transcript, slice_id);
                         if let Some(transcript) = transcript_opt {
                             eprintln!("sending transcription to API: {:?}", transcript.text());
                             tx_api

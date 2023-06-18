@@ -33,6 +33,7 @@ impl Whisper {
             audio_data,
             audio_duration,
             previous_tokens,
+            slice_id,
             start_timestamp,
             user_id,
         }: TranscriptionRequest,
@@ -45,13 +46,18 @@ impl Whisper {
 
         let segments = conversion_task.await.unwrap();
 
-        TranscriptionResponse(Transcription {
+        let transcript = Transcription {
             start_timestamp,
             user_id,
             segments,
             audio_duration,
             processing_time: processing_start.elapsed(),
-        })
+        };
+
+        TranscriptionResponse {
+            slice_id,
+            transcript,
+        }
     }
 
     /// This will take a long time to run, don't call it

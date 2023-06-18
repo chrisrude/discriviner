@@ -27,9 +27,13 @@ pub(crate) struct TranscriptionRequest {
     pub audio_data: bytes::Bytes,
     pub audio_duration: Duration,
     pub previous_tokens: Vec<WhisperToken>,
+    pub slice_id: u32,
     pub start_timestamp: SystemTime,
     pub user_id: UserId,
 }
 
 #[derive(Debug)]
-pub(crate) struct TranscriptionResponse(pub Transcription);
+pub(crate) struct TranscriptionResponse {
+    pub slice_id: u32,
+    pub transcript: Transcription,
+}

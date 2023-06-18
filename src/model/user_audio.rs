@@ -37,15 +37,18 @@ pub(crate) struct UserAudio {
     /// If true, the user is not speaking at this instant.
     /// (though they may had been speaking an instant ago)
     pub user_silent: bool,
+
+    pub next_slice_id: u32,
 }
 
 impl UserAudio {
     pub fn new(user_id: UserId) -> Self {
         Self {
-            slices: vec![AudioSlice::new(), AudioSlice::new()],
+            slices: vec![AudioSlice::new(1), AudioSlice::new(2)],
             last_tokens: VecDeque::with_capacity(TOKENS_TO_KEEP),
             user_id,
             user_silent: false,
+            next_slice_id: 3,
         }
     }
 
@@ -66,7 +69,8 @@ impl UserAudio {
             slice
         } else {
             // if we didn't find a slice, then we need to create a new one.
-            self.slices.push(AudioSlice::new());
+            self.slices.push(AudioSlice::new(self.next_slice_id));
+            self.next_slice_id += 1;
             eprintln!("created new slice, total is now {}", self.slices.len());
             self.slices.last_mut().unwrap()
         };
@@ -113,17 +117,15 @@ impl UserAudio {
     pub fn handle_transcription_response(
         &mut self,
         message: &Transcription,
+        slice_id: u32,
     ) -> Option<Transcription> {
         // find the slice whose start time matches the response's start time.
         // if we find it, then we can update the slice with the response.
         // if we don't find it, then we can't do anything with the response.
-        let slice_opt = self.slices.iter_mut().find(|slice| {
-            if let Some((_, start_timestamp)) = slice.start_time {
-                start_timestamp == message.start_timestamp
-            } else {
-                false
-            }
-        });
+        let slice_opt = self
+            .slices
+            .iter_mut()
+            .find(|slice| slice.slice_id == slice_id);
         if let Some(slice) = slice_opt {
             let result = slice.handle_transcription_response(message);
             if result.is_some() {
@@ -131,7 +133,6 @@ impl UserAudio {
             }
             result
         } else {
-            eprintln!("couldn't find slice for response");
             None
         }
     }
@@ -141,10 +142,11 @@ impl UserAudio {
             .iter_mut()
             .filter_map(|s| s.make_transcription_request(self.user_silent))
             .map(
-                |(audio_data, audio_duration, start_timestamp)| TranscriptionRequest {
+                |(audio_data, audio_duration, slice_id, start_timestamp)| TranscriptionRequest {
                     audio_data,
                     audio_duration,
                     previous_tokens: Vec::from(self.last_tokens.clone()),
+                    slice_id,
                     start_timestamp,
                     user_id: self.user_id,
                 },

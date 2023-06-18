@@ -1,5 +1,5 @@
 use std::{
-    iter,
+    cmp::max,
     num::Wrapping,
     time::{Duration, SystemTime},
 };
@@ -49,31 +49,48 @@ fn rtc_timestamp_to_index(ts1: DiscordRtcTimestamp, ts2: DiscordRtcTimestamp) ->
     delta * WHISPER_SAMPLES_PER_MILLISECOND / RTC_CLOCK_SAMPLES_PER_MILLISECOND as usize
 }
 
+fn discord_samples_to_whisper_samples(samples: usize) -> usize {
+    samples / (BITRATE_CONVERSION_RATIO * DISCORD_AUDIO_CHANNELS)
+}
+
 fn samples_to_duration(num_samples: usize) -> u64 {
     (num_samples / WHISPER_SAMPLES_PER_MILLISECOND) as u64
+}
+
+pub(crate) struct LastRequestInfo {
+    pub original_duration: Duration,
+    pub audio_trimmed_since_request: Duration,
+}
+
+impl LastRequestInfo {
+    pub fn effective_duration(&self) -> Duration {
+        self.original_duration - self.audio_trimmed_since_request
+    }
 }
 
 pub(crate) struct AudioSlice {
     pub audio: Vec<WhisperAudioSample>,
     pub finalized: bool,
-    pub last_request: Option<Duration>,
+    pub last_request: Option<LastRequestInfo>,
+    pub slice_id: u32,
     pub start_time: Option<(DiscordRtcTimestamp, SystemTime)>,
     pub tentative_transcript_opt: Option<Transcription>,
 }
 
 impl AudioSlice {
-    pub fn new() -> Self {
+    pub fn new(slice_id: u32) -> Self {
         Self {
             audio: Vec::with_capacity(WHISPER_AUDIO_BUFFER_SIZE),
             finalized: false,
             last_request: None,
+            slice_id,
             start_time: None,
             tentative_transcript_opt: None,
         }
     }
 
     pub fn clear(&mut self) {
-        eprintln!("clearing audio slice");
+        eprintln!("{}: clearing audio slice", self.slice_id);
         self.audio.clear();
         self.finalized = false;
         self.last_request = None;
@@ -121,94 +138,76 @@ impl AudioSlice {
             // if the timestamp is not within the bounds of this slice,
             // then we need to create a new slice.
             if self.finalized {
-                eprintln!("audio buffer overflow, dropping audio");
+                eprintln!("{}: audio buffer overflow, dropping audio", self.slice_id);
                 return;
             }
-            eprintln!("trying to add audio to inactive slice, dropping audio");
+            eprintln!(
+                "{}: trying to add audio to inactive slice, dropping audio",
+                self.slice_id
+            );
             return;
         }
-        // calculate the time difference between the end of the last
-        // slice and the start of this one.  If it is more than
-        let padding;
+
+        let start_index;
         if let Some((start_rtc, _)) = self.start_time {
-            // padding is the difference between the current end time
-            // and the start of the new audio
-            eprintln!(
-                "rtc timestamp: {}... start {}",
-                rtc_timestamp,
-                self.start_time.unwrap().0
-            );
-            let rtc_idx = rtc_timestamp_to_index(start_rtc, rtc_timestamp);
-            eprintln!("rtc index: {}", rtc_idx);
-            eprintln!("audio len: {}", self.audio.len());
-            padding = rtc_idx - self.audio.len();
+            start_index = rtc_timestamp_to_index(start_rtc, rtc_timestamp);
         } else {
             // this is the first audio for the slice, so we need to set
             // the start time
             self.start_time = Some((rtc_timestamp, SystemTime::now()));
-            padding = 0;
+            start_index = 0;
         }
 
-        // if there's a gap between the end of our current
-        // audio and the start of the new audio, fill it
-        // with silence.
-        if padding > 0 {
-            eprintln!(
-                "padding audio with {} samples, total of {} ms",
-                padding,
-                samples_to_duration(padding)
-            );
-            eprintln!(
-                "rtc timestamp: {}... start {}",
-                rtc_timestamp,
-                self.start_time.unwrap().0
-            );
-            self.audio
-                .extend(iter::repeat(WhisperAudioSample::default()).take(padding));
-        }
+        self.resample_audio_from_discord_to_whisper(start_index, discord_audio);
 
-        if self.tentative_transcript_opt.is_some() {
-            eprintln!("discarding tentative transcription");
-        }
-
-        // since more audio has come in, discard the tentative transcription
-        self.tentative_transcript_opt = None;
-
-        self.resample_audio_from_discord_to_whisper(discord_audio);
+        // if self.tentative_transcript_opt.is_some() {
+        //     eprintln!("discarding tentative transcription");
+        // }
 
         // update the last slice to point to the end of the buffer
     }
 
-    fn resample_audio_from_discord_to_whisper(&mut self, audio: &[types::DiscordAudioSample]) {
-        for samples in audio.chunks_exact(BITRATE_CONVERSION_RATIO * DISCORD_AUDIO_CHANNELS) {
+    /// Transcode the audio into the given location of the buffer,
+    /// converting it from Discord's format (48khz stereo PCM16)
+    /// to Whisper's format (16khz mono f32).
+    ///
+    /// This handles several cases:
+    ///  - a single allocation for the new audio at the end of the buffer
+    ///  - also, inserting silence if the new audio is not contiguous with
+    ///    the previous audio
+    ///  - doing it in a way that we can also backfill audio if we get
+    ///    packets out-of-order
+    ///
+    fn resample_audio_from_discord_to_whisper(
+        &mut self,
+        start_index: usize,
+        discord_audio: &[DiscordAudioSample],
+    ) {
+        let end_index = start_index + discord_samples_to_whisper_samples(discord_audio.len());
+        let buffer_len = max(self.audio.len(), end_index);
+
+        self.audio.resize(buffer_len, WhisperAudioSample::default());
+
+        let dest_buf = &mut self.audio[start_index..end_index];
+
+        for (i, samples) in discord_audio
+            .chunks_exact(BITRATE_CONVERSION_RATIO * DISCORD_AUDIO_CHANNELS)
+            .enumerate()
+        {
             // sum the channel data, and divide by the max value possible to
             // get a value between -1.0 and 1.0
-            self.audio.push(
-                samples
-                    .iter()
-                    .take(DISCORD_AUDIO_CHANNELS)
-                    .map(|x| *x as types::WhisperAudioSample)
-                    .sum::<types::WhisperAudioSample>()
-                    / DISCORD_AUDIO_MAX_VALUE_TWO_SAMPLES,
-            );
+            dest_buf[i] = samples
+                .iter()
+                .take(DISCORD_AUDIO_CHANNELS)
+                .map(|x| *x as types::WhisperAudioSample)
+                .sum::<types::WhisperAudioSample>()
+                / DISCORD_AUDIO_MAX_VALUE_TWO_SAMPLES;
         }
     }
 
     fn is_ready_for_transcription(&self, user_silent: bool) -> bool {
         if self.start_time.is_none() {
             return false;
-        }
-
-        let last_period;
-        if let Some(last) = self.last_request {
-            if last == self.buffer_duration() {
-                // if the last request was for the entire buffer, then
-                // we don't need to request again
-                return false;
-            }
-            last_period = last.as_millis() / AUTO_TRANSCRIPTION_PERIOD_MS;
-        } else {
-            last_period = 0;
         }
 
         if self.finalized {
@@ -224,6 +223,13 @@ impl AudioSlice {
         }
 
         let current_period = self.buffer_duration().as_millis() / AUTO_TRANSCRIPTION_PERIOD_MS;
+        let last_period;
+        if let Some(last_request_info) = self.last_request.as_ref() {
+            last_period =
+                last_request_info.effective_duration().as_millis() / AUTO_TRANSCRIPTION_PERIOD_MS;
+        } else {
+            last_period = 0;
+        }
 
         last_period != current_period
     }
@@ -231,7 +237,7 @@ impl AudioSlice {
     pub fn make_transcription_request(
         &mut self,
         user_silent: bool,
-    ) -> Option<(Bytes, Duration, SystemTime)> {
+    ) -> Option<(Bytes, Duration, u32, SystemTime)> {
         if !self.is_ready_for_transcription(user_silent) {
             return None;
         }
@@ -243,9 +249,16 @@ impl AudioSlice {
             };
 
             let duration = self.buffer_duration();
-            eprintln!("requesting transcription for {} ms", duration.as_millis());
-            self.last_request = Some(duration);
-            return Some((Bytes::from(byte_data), duration, start_time));
+            eprintln!(
+                "{}: requesting transcription for {} ms",
+                self.slice_id,
+                duration.as_millis()
+            );
+            self.last_request = Some(LastRequestInfo {
+                original_duration: self.buffer_duration(),
+                audio_trimmed_since_request: Duration::ZERO,
+            });
+            return Some((Bytes::from(byte_data), duration, self.slice_id, start_time));
         }
         None
     }
@@ -257,11 +270,11 @@ impl AudioSlice {
     pub fn discard_audio(&mut self, duration: &Duration) {
         let discard_idx = duration.as_millis() as usize * WHISPER_SAMPLES_PER_MILLISECOND;
 
-        eprintln!(
-            "discarding {} ms of audio from {} ms buffer",
-            duration.as_millis(),
-            self.buffer_duration().as_millis()
-        );
+        // eprintln!(
+        //     "discarding {} ms of audio from {} ms buffer",
+        //     duration.as_millis(),
+        //     self.buffer_duration().as_millis()
+        // );
 
         if discard_idx > self.audio.len() {
             // discard more than we have, so just clear the buffer
@@ -281,8 +294,9 @@ impl AudioSlice {
         }
 
         // also update the last_request duration
-        if let Some(last_request) = self.last_request {
-            self.last_request = Some(last_request - *duration);
+        // call trim_audio to update the last_request
+        if let Some(last_request) = self.last_request.as_mut() {
+            last_request.audio_trimmed_since_request += *duration;
         }
     }
 
@@ -351,15 +365,15 @@ impl AudioSlice {
                 message.audio_duration
             );
 
-            eprintln!(
-                "have transcription: {} final segments ({} ms), {} tentative segments ({} ms)",
-                finalized_transcript.segments.len(),
-                finalized_transcript.audio_duration.as_millis(),
-                tentative_transcript.segments.len(),
-                tentative_transcript.audio_duration.as_millis(),
-            );
-            eprintln!("finalized transcription: '{}'", finalized_transcript.text(),);
-            eprintln!("tentative transcription: '{}'", tentative_transcript.text(),);
+            // eprintln!(
+            //     "have transcription: {} final segments ({} ms), {} tentative segments ({} ms)",
+            //     finalized_transcript.segments.len(),
+            //     finalized_transcript.audio_duration.as_millis(),
+            //     tentative_transcript.segments.len(),
+            //     tentative_transcript.audio_duration.as_millis(),
+            // );
+            // eprintln!("finalized transcription: '{}'", finalized_transcript.text(),);
+            // eprintln!("tentative transcription: '{}'", tentative_transcript.text(),);
 
             // with our finalized transcription, we can now discard
             // the audio that was used to generate it.  Be sure to
@@ -371,10 +385,10 @@ impl AudioSlice {
             // transcription, that means no new audio has arrived in the
             // meantime, so we can keep the tentative transcription.
             if self.buffer_duration() == tentative_transcript.audio_duration {
-                eprintln!("keeping tentative transcription");
+                // eprintln!("keeping tentative transcription");
                 self.tentative_transcript_opt = Some(tentative_transcript);
             } else {
-                eprintln!("discarding tentative transcription");
+                // eprintln!("discarding tentative transcription");
                 self.tentative_transcript_opt = None;
             }
 
@@ -392,7 +406,7 @@ mod tests {
 
     #[test]
     fn test_discard_audio() {
-        let mut slice = AudioSlice::new();
+        let mut slice = AudioSlice::new(123);
         slice.start_time = Some((
             Wrapping(1000 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32),
             SystemTime::now(),
@@ -411,7 +425,7 @@ mod tests {
     const DISCORD_SAMPLES_PER_MILLISECOND: usize = DISCORD_SAMPLES_PER_SECOND / 1000;
     #[test]
     fn test_add_audio() {
-        let mut slice = AudioSlice::new();
+        let mut slice = AudioSlice::new(234);
         slice.start_time = Some((
             Wrapping(1000 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32),
             SystemTime::now(),
