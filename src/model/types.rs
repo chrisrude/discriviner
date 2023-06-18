@@ -338,7 +338,7 @@ impl Transcription {
         for segment in &self.segments {
             text.push_str(segment.text().as_str());
         }
-        text.push_str("(");
+        text.push('(');
         text.push_str(self.segments.len().to_string().as_str());
         text.push_str(" segments)");
         text

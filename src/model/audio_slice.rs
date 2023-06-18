@@ -281,16 +281,14 @@ impl AudioSlice {
                 final_request: self.finalized,
             };
             if let Some(last_request) = self.last_request.as_ref() {
-                if last_request.start_time == new_request.start_time {
-                    if last_request.original_duration == new_request.original_duration {
-                        eprintln!("{}: discarding duplicate request", self.slice_id);
-                        // if this is our final request, make sure the last request
-                        // has the final flag set
-                        if new_request.final_request {
-                            self.last_request.as_mut().unwrap().final_request = true;
-                        }
-                        return None;
+                if last_request.start_time == new_request.start_time && last_request.original_duration == new_request.original_duration {
+                    eprintln!("{}: discarding duplicate request", self.slice_id);
+                    // if this is our final request, make sure the last request
+                    // has the final flag set
+                    if new_request.final_request {
+                        self.last_request.as_mut().unwrap().final_request = true;
                     }
+                    return None;
                 }
                 if last_request.in_progress {
                     eprintln!("{}: discarding previous in-progress request", self.slice_id);
@@ -351,16 +349,11 @@ impl AudioSlice {
             self.buffer_duration().as_millis()
         );
 
-        if self.tentative_transcript_opt.is_none() {
-            // if we don't have a tentative transcription, then
-            // we can't return anything
-            // eprintln!("no tentative transcription in finalize, returning None");
-            return None;
-        }
+        self.tentative_transcript_opt.as_ref()?;
 
         let tentative_transcript = self.tentative_transcript_opt.take().unwrap();
 
-        if tentative_transcript.segments.len() > 0 {
+        if !tentative_transcript.segments.is_empty() {
             eprintln!(
                 "tentative description has {} segments, covering {} ms",
                 tentative_transcript.segments.len(),
