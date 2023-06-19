@@ -4,8 +4,6 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use bytes::Bytes;
-
 use super::{
     constants::{
         AUDIO_TO_RECORD, AUDIO_TO_RECORD_SECONDS, AUTO_TRANSCRIPTION_PERIOD_MS,
@@ -182,9 +180,10 @@ impl AudioSlice {
 
         self.resample_audio_from_discord_to_whisper(start_index, discord_audio);
 
-        // if self.tentative_transcript_opt.is_some() {
-        //     eprintln!("discarding tentative transcription");
-        // }
+        if self.tentative_transcript_opt.is_some() {
+            eprintln!("discarding tentative transcription");
+            self.tentative_transcript_opt = None;
+        }
 
         // update the last slice to point to the end of the buffer
     }
@@ -266,17 +265,13 @@ impl AudioSlice {
         last_period != current_period
     }
 
-    pub fn make_transcription_request(&mut self) -> Option<(Bytes, Duration, SystemTime)> {
+    pub fn make_transcription_request(
+        &mut self,
+    ) -> Option<(Vec<WhisperAudioSample>, Duration, SystemTime)> {
         if !self.is_ready_for_transcription() {
             return None;
         }
         if let Some((_, start_time)) = self.start_time {
-            let buffer = self.audio.as_slice();
-            let buffer_len_bytes = std::mem::size_of_val(buffer);
-            let byte_data = unsafe {
-                std::slice::from_raw_parts(buffer.as_ptr() as *const u8, buffer_len_bytes)
-            };
-
             let duration = self.buffer_duration();
             eprintln!(
                 "{}: requesting transcription for {} ms",
@@ -308,7 +303,10 @@ impl AudioSlice {
                 }
             }
             self.last_request = Some(new_request);
-            return Some((Bytes::from(byte_data), duration, start_time));
+
+            let buffer = self.audio.as_slice();
+
+            return Some((Vec::from(buffer), duration, start_time));
         }
         None
     }

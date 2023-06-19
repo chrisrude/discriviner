@@ -62,23 +62,14 @@ impl Whisper {
     /// audio data should be is f32, 16KHz, mono
     fn audio_to_text(
         whisper_context: &WhisperContext,
-        audio_data_bytes: bytes::Bytes,
+        audio_data: Vec<WhisperAudioSample>,
         previous_tokens: Vec<WhisperToken>,
     ) -> Vec<TextSegment> {
         let mut state = whisper_context.create_state().unwrap();
 
-        let audio_len_bytes = audio_data_bytes.len();
-        let audio_len_samples = audio_len_bytes / std::mem::size_of::<WhisperAudioSample>();
-        let audio_data = unsafe {
-            std::slice::from_raw_parts(
-                audio_data_bytes.as_ptr() as *const WhisperAudioSample,
-                audio_len_samples,
-            )
-        };
-
         // actually convert audio to text.  Takes a while.
         state
-            .full(Self::make_params(&previous_tokens), audio_data)
+            .full(Self::make_params(&previous_tokens), audio_data.as_slice())
             .unwrap();
 
         let num_segments = state.full_n_segments().unwrap();
@@ -120,9 +111,10 @@ impl Whisper {
         params.set_print_progress(false);
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
-        params.set_suppress_non_speech_tokens(true);
 
         params.set_tokens(previous_tokens.as_slice());
+        params.set_suppress_blank(true);
+        params.set_suppress_non_speech_tokens(true);
 
         params
     }
