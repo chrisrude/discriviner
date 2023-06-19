@@ -368,7 +368,7 @@ mod tests {
         slice.start_time = Some((start_rtc, SystemTime::now()));
 
         const STEREO_SAMPLES_PER_SECOND: usize =
-            1 * DISCORD_SAMPLES_PER_SECOND * DISCORD_AUDIO_CHANNELS;
+            DISCORD_SAMPLES_PER_SECOND * DISCORD_AUDIO_CHANNELS;
 
         const SILENT_DISCORD_AUDIO: [DiscordAudioSample; STEREO_SAMPLES_PER_SECOND] =
             [0; STEREO_SAMPLES_PER_SECOND];
