@@ -33,10 +33,6 @@ pub(crate) struct UserAudio {
 
     /// User ID of the user that this buffer is for.
     pub user_id: UserId,
-
-    /// If true, the user is not speaking at this instant.
-    /// (though they may had been speaking an instant ago)
-    pub user_silent: bool,
 }
 
 impl UserAudio {
@@ -46,7 +42,6 @@ impl UserAudio {
             slice: AudioSlice::new(user_id),
             last_tokens: VecDeque::with_capacity(TOKENS_TO_KEEP),
             user_id,
-            user_silent: false,
         }
     }
 
@@ -57,30 +52,15 @@ impl UserAudio {
     ) {
         // find a slice that will take the audio, and add it.
         // create a new slice if necessary.
-        self.user_silent = false;
         self.slice.add_audio(rtc_timestamp, discord_audio);
     }
 
     pub fn handle_user_idle(&mut self) -> Option<Transcription> {
-        // assert!(self.user_silent);
-        if !self.user_silent {
-            eprintln!("user is not silent, but handle_user_idle called anyway!");
-            eprintln!("IDLE");
-            eprintln!("IDLE");
-            eprintln!("IDLE");
-            eprintln!("IDLE");
-            eprintln!("IDLE");
-            eprintln!("IDLE");
-            eprintln!("IDLE");
-            // todo: fix!
-            self.user_silent = true;
-        }
         self.slice.finalize()
     }
 
     pub fn set_silent(&mut self) {
-        assert!(!self.user_silent);
-        self.user_silent = true;
+        self.slice.set_silent();
     }
 
     fn add_tokens(&mut self, message: &Transcription) {
@@ -107,7 +87,7 @@ impl UserAudio {
 
     pub fn try_get_transcription_request(&mut self) -> Option<TranscriptionRequest> {
         if let Some((audio_data, audio_duration, start_timestamp)) =
-            self.slice.make_transcription_request(self.user_silent)
+            self.slice.make_transcription_request()
         {
             Some(TranscriptionRequest {
                 audio_data,

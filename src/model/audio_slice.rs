@@ -79,6 +79,7 @@ pub(crate) struct AudioSlice {
     pub slice_id: u64,
     pub start_time: Option<(DiscordRtcTimestamp, SystemTime)>,
     pub tentative_transcript_opt: Option<Transcription>,
+    pub user_silent: bool,
 }
 
 impl AudioSlice {
@@ -90,6 +91,7 @@ impl AudioSlice {
             slice_id,
             start_time: None,
             tentative_transcript_opt: None,
+            user_silent: false,
         }
     }
 
@@ -100,6 +102,11 @@ impl AudioSlice {
         self.last_request = None;
         self.start_time = None;
         self.tentative_transcript_opt = None;
+        self.user_silent = true;
+    }
+
+    pub fn set_silent(&mut self) {
+        self.user_silent = true;
     }
 
     /// True if the given timestamp is within the bounds of this slice.
@@ -141,6 +148,15 @@ impl AudioSlice {
         rtc_timestamp: DiscordRtcTimestamp,
         discord_audio: &[DiscordAudioSample],
     ) {
+        // it seems like we get called with a single packet of silence right
+        // after we are marked as silent.  Look for this and discard it.
+        if self.user_silent && discord_audio.iter().all(|&x| x == 0) {
+            // eprintln!("{}: ignoring silent audio", self.slice_id);
+            return;
+        }
+
+        self.user_silent = false;
+
         let rtc_length = duration_to_rtc(&samples_to_duration(discord_audio.len()));
 
         if !self.fits_within_this_slice(rtc_timestamp + rtc_length) {
@@ -211,7 +227,7 @@ impl AudioSlice {
         }
     }
 
-    fn is_ready_for_transcription(&self, user_silent: bool) -> bool {
+    fn is_ready_for_transcription(&self) -> bool {
         if self.start_time.is_none() {
             return false;
         }
@@ -230,7 +246,7 @@ impl AudioSlice {
             }
         }
 
-        if user_silent {
+        if self.user_silent {
             // if the user is silent, then we need to request the full
             // buffer, even if no period shift has occurred
             // in this case we'll have two outstanding transcription
@@ -250,11 +266,8 @@ impl AudioSlice {
         last_period != current_period
     }
 
-    pub fn make_transcription_request(
-        &mut self,
-        user_silent: bool,
-    ) -> Option<(Bytes, Duration, SystemTime)> {
-        if !self.is_ready_for_transcription(user_silent) {
+    pub fn make_transcription_request(&mut self) -> Option<(Bytes, Duration, SystemTime)> {
+        if !self.is_ready_for_transcription() {
             return None;
         }
         if let Some((_, start_time)) = self.start_time {
