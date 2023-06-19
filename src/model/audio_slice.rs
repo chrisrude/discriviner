@@ -53,8 +53,8 @@ fn discord_samples_to_whisper_samples(samples: usize) -> usize {
     samples / (BITRATE_CONVERSION_RATIO * DISCORD_AUDIO_CHANNELS)
 }
 
-fn samples_to_duration(num_samples: usize) -> u64 {
-    (num_samples / WHISPER_SAMPLES_PER_MILLISECOND) as u64
+fn samples_to_duration(num_samples: usize) -> Duration {
+    Duration::from_millis((num_samples / WHISPER_SAMPLES_PER_MILLISECOND) as u64)
 }
 
 pub(crate) struct LastRequestInfo {
@@ -109,13 +109,10 @@ impl AudioSlice {
     /// any timestamp.
     pub fn fits_within_this_slice(&self, rtc_timestamp: DiscordRtcTimestamp) -> bool {
         if let Some((start_rtc, _)) = self.start_time {
-            let current_end = start_rtc + duration_to_rtc(&self.buffer_duration());
-
             // add end of buffer
             // note: this will ignore the size of the audio we're looking to
             // add, but that's ok
-            let timeout = duration_to_rtc(&AUDIO_TO_RECORD);
-            let end = current_end + timeout;
+            let end = start_rtc + duration_to_rtc(&AUDIO_TO_RECORD);
 
             let result = if start_rtc < end {
                 rtc_timestamp >= start_rtc && rtc_timestamp < end
@@ -144,7 +141,9 @@ impl AudioSlice {
         rtc_timestamp: DiscordRtcTimestamp,
         discord_audio: &[DiscordAudioSample],
     ) {
-        if !self.fits_within_this_slice(rtc_timestamp) {
+        let rtc_length = duration_to_rtc(&samples_to_duration(discord_audio.len()));
+
+        if !self.fits_within_this_slice(rtc_timestamp + rtc_length) {
             // if the timestamp is not within the bounds of this slice,
             // then we need to create a new slice.
             eprintln!(
@@ -253,9 +252,9 @@ impl AudioSlice {
 
     pub fn make_transcription_request(
         &mut self,
-        user_idle: bool,
+        user_silent: bool,
     ) -> Option<(Bytes, Duration, SystemTime)> {
-        if !self.is_ready_for_transcription(user_idle) {
+        if !self.is_ready_for_transcription(user_silent) {
             return None;
         }
         if let Some((_, start_time)) = self.start_time {
@@ -365,21 +364,17 @@ impl AudioSlice {
         // if we had a tentative transcription, return it.
         // We know that it's current, since if we had gathered
         // more audio, we would have discarded it.
-        if tentative_transcript.audio_duration != self.buffer_duration() {
-            eprintln!(
-                "tentative transcription duration {} != buffer duration {}",
-                tentative_transcript.audio_duration.as_millis(),
-                self.buffer_duration().as_millis()
-            );
-            return None;
-        }
+        assert!(
+            tentative_transcript.audio_duration == self.buffer_duration(),
+            "tentative transcription duration != buffer duration",
+        );
         self.clear();
 
         Some(tentative_transcript)
     }
 
     pub fn buffer_duration(&self) -> Duration {
-        Duration::from_millis(samples_to_duration(self.audio.len()))
+        samples_to_duration(self.audio.len())
     }
 
     pub fn handle_transcription_response(
@@ -498,7 +493,7 @@ mod tests {
         assert_eq!(slice.buffer_duration(), Duration::from_millis(500));
         assert_eq!(slice.audio.len(), 500 * WHISPER_SAMPLES_PER_MILLISECOND);
         let time = slice.start_time.unwrap().0;
-        assert_eq!(time.0, 500 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32);
+        assert_eq!(time.0, 1500 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32);
     }
 
     const DISCORD_SAMPLES_PER_MILLISECOND: usize = DISCORD_SAMPLES_PER_SECOND / 1000;
@@ -509,6 +504,11 @@ mod tests {
             Wrapping(1000 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32),
             SystemTime::now(),
         ));
+
+        // check the buffer capacity at the top.  At the end it should
+        // still the same.
+        let original_capacity = slice.audio.capacity();
+
         slice.audio = vec![0.0; 1000 * WHISPER_SAMPLES_PER_MILLISECOND];
         assert_eq!(slice.buffer_duration(), Duration::from_millis(1000));
 
@@ -532,9 +532,12 @@ mod tests {
         let time = slice.start_time.unwrap().0;
         assert_eq!(time.0, 1000 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32);
 
+        let max_acceptable_rtc = (((1 + AUDIO_TO_RECORD_SECONDS) * 1000)
+            * RTC_CLOCK_SAMPLES_PER_MILLISECOND as usize) as u32
+            - 1;
         // don't add audio that's too far in the future
         slice.add_audio(
-            Wrapping(8000 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32),
+            Wrapping(max_acceptable_rtc),
             &vec![1; 500 * DISCORD_SAMPLES_PER_MILLISECOND * DISCORD_AUDIO_CHANNELS],
         );
 
@@ -551,11 +554,11 @@ mod tests {
             !slice.fits_within_this_slice(Wrapping(999 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32))
         );
 
-        assert!(
-            slice.fits_within_this_slice(Wrapping(6499 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32))
-        );
+        assert!(slice.fits_within_this_slice(Wrapping(max_acceptable_rtc)));
 
-        assert!(!slice
-            .fits_within_this_slice(Wrapping(6500 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32)));
+        assert!(!slice.fits_within_this_slice(Wrapping(max_acceptable_rtc + 1)));
+
+        // make sure the buffer didn't grow
+        assert!(slice.audio.capacity() <= original_capacity);
     }
 }

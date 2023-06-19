@@ -64,8 +64,16 @@ impl UserAudio {
     pub fn handle_user_idle(&mut self) -> Option<Transcription> {
         // assert!(self.user_silent);
         if !self.user_silent {
-            eprintln!("user is not silent, user inactive called anyway!");
+            eprintln!("user is not silent, but handle_user_idle called anyway!");
+            eprintln!("IDLE");
+            eprintln!("IDLE");
+            eprintln!("IDLE");
+            eprintln!("IDLE");
+            eprintln!("IDLE");
+            eprintln!("IDLE");
+            eprintln!("IDLE");
             // todo: fix!
+            self.user_silent = true;
         }
         self.slice.finalize()
     }
@@ -131,7 +139,7 @@ mod tests {
         assert!(user_audio.slice.start_time.is_some());
         assert_eq!(user_audio.slice.audio.len(), 960 / (2 * 3));
 
-        user_audio.add_audio(Wrapping(1001234), &audio);
+        user_audio.add_audio(Wrapping(100001234), &audio);
         assert_eq!(user_audio.slice.audio.len(), 960 / (2 * 3));
     }
 }

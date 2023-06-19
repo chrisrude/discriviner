@@ -133,8 +133,8 @@ impl<'a> AudioManager {
                     // this user has stopped talking for long enough, see if
                     // we have any audio left to finalize
                     self.with_buffer_for_user(user_id, |buffer| {
-                        eprintln!("user {:?} has become idle", user_id);
                         if idle {
+                            eprintln!("user {:?} has become idle", user_id);
                             if let Some(transcript) = buffer.handle_user_idle() {
                                 eprintln!("sending final transcription to API: {:?}", transcript.text());
                                 tx_api
@@ -144,6 +144,7 @@ impl<'a> AudioManager {
                                 .unwrap();
                             }
                         } else {
+                            eprintln!("user {:?} is silent", user_id);
                             buffer.set_silent();
                         }
                         Self::maybe_request_transcription(
