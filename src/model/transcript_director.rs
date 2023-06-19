@@ -1,5 +1,4 @@
 use std::{
-    cmp::min,
     collections::VecDeque,
     time::{Duration, Instant, SystemTime},
 };
@@ -14,9 +13,8 @@ use super::{
     audio_slice::AudioSlice,
     constants::{
         AUTO_TRANSCRIPTION_PERIOD_MS, SILENT_TIMEOUT, TOKENS_TO_KEEP, USER_SILENCE_TIMEOUT,
-        WHISPER_SAMPLES_PER_MILLISECOND,
     },
-    types::{DiscordAudioSample, DiscordRtcTimestamp, Transcription, WhisperAudioSample},
+    types::{DiscordAudioSample, DiscordRtcTimestamp, Transcription},
 };
 
 pub(crate) struct LastRequestInfo {
@@ -121,11 +119,11 @@ impl TranscriptDirector {
         }
 
         if self.user_silent {
+            // if the user is silent, then we need to request the full
+            // buffer, even if no period shift has occurred
+            // in this case we'll have two outstanding transcription
+            // requests...
             if self.last_silent_time.elapsed() > SILENT_TIMEOUT {
-                // if the user is silent, then we need to request the full
-                // buffer, even if no period shift has occurred
-                // in this case we'll have two outstanding transcription
-                // requests...
                 self.last_silent_time = Instant::now();
                 return true;
             } else {
@@ -240,41 +238,18 @@ impl TranscriptDirector {
     }
 
     fn shortcut_tentative_transcripts(&self, message: &Transcription) -> bool {
-        // figures out where the end of the message's audio is
-        // in the current buffer.  Then checks for a period of
-        // up to USER_SILENCE_TIMEOUT beyond that point.
-        // If we reach the end of that period without seeing
-        // any non-silence, we can return the tentative transcript
-        // immediately, and this function will return true.
-        // Otherwise, it returns false.
-        let now = SystemTime::now();
-        if message.start_timestamp + message.audio_duration + USER_SILENCE_TIMEOUT > now {
-            // the future hasn't happened yet
+        // has enough time elapsed since the last request that we can
+        // expect audio to have been in the buffer?
+        let time_since_request = SystemTime::now()
+            .duration_since(self.last_request.as_ref().unwrap().requested_at)
+            .unwrap();
+        if time_since_request < SILENT_TIMEOUT {
             return false;
         }
 
-        let end_idx = message.audio_duration.as_millis() as usize * WHISPER_SAMPLES_PER_MILLISECOND;
-        let end_of_silence_interval =
-            end_idx + USER_SILENCE_TIMEOUT.as_millis() as usize * WHISPER_SAMPLES_PER_MILLISECOND;
-
-        if self.slice.audio.len() < end_idx {
-            eprintln!("{}: not enough audio for shortcut", self.slice_id);
-            return false;
-        }
-
-        if (self.slice.audio.len() < end_of_silence_interval) && !self.user_idle {
-            eprintln!("{}: not enough audio for silence interval", self.slice_id);
-            return false;
-        }
-
-        let end_of_search = min(self.slice.audio.len(), end_of_silence_interval);
-        // look through [end_idx, end_of_search) for non-silence
-        let has_non_silence = self.slice.audio[end_idx..end_of_search]
-            .iter()
-            .any(|&sample| sample != WhisperAudioSample::default());
-
-        // if we found non-silence, we can't shortcut, otherwise we can
-        !has_non_silence
+        // did we receive any audio from the silent period?
+        self.slice
+            .is_interval_silent(&message.audio_duration, &USER_SILENCE_TIMEOUT)
     }
 
     pub fn handle_transcription_response(

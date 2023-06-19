@@ -1,5 +1,5 @@
 use std::{
-    cmp::max,
+    cmp::{max, min},
     num::Wrapping,
     time::{Duration, SystemTime},
 };
@@ -73,38 +73,29 @@ impl AudioSlice {
 
     /// True if the given timestamp is within the bounds of this slice.
     /// Bounds are considered to begin with the start of the slice,
-    /// and end within the given timeout of the end of the slice.
+    /// and end with the start of the slice plus the length of the
+    /// audio to record.
     /// An empty slice is considered to have no bounds, and will fit
     /// any timestamp.
     fn fits_within_this_slice(&self, rtc_timestamp: DiscordRtcTimestamp) -> bool {
-        if let Some((start_rtc, _)) = self.start_time {
-            // add end of buffer
-            // note: this will ignore the size of the audio we're looking to
-            // add, but that's ok
-            let end = start_rtc + duration_to_rtc(&AUDIO_TO_RECORD);
-
-            let result = if start_rtc < end {
-                rtc_timestamp >= start_rtc && rtc_timestamp < end
-            } else {
-                // if the slice wraps around, then we need to check
-                // if the timestamp is either before the end or after
-                // the start.
-                rtc_timestamp < end || rtc_timestamp >= start_rtc
-            };
-
-            if !result {
-                eprintln!(
-                    "{}: timestamp {} does not fit within slice.  start={:?} end={:?}",
-                    self.slice_id, rtc_timestamp, self.start_time, end,
-                )
-            }
-            result
-        } else {
+        if self.start_time.is_none() {
             // this is a blank slice, so any timestamp fits
-            true
+            return true;
+        }
+        let start_rtc = self.start_time.unwrap().0;
+        let end = start_rtc + duration_to_rtc(&AUDIO_TO_RECORD);
+
+        if start_rtc < end {
+            rtc_timestamp >= start_rtc && rtc_timestamp < end
+        } else {
+            // if the slice wraps around, then we need to check
+            // if the timestamp is either before the end or after
+            // the start.
+            rtc_timestamp < end || rtc_timestamp >= start_rtc
         }
     }
 
+    /// True if the given audio can entirely fit within this slice.
     pub fn can_fit_audio(
         &self,
         rtc_timestamp: DiscordRtcTimestamp,
@@ -124,10 +115,14 @@ impl AudioSlice {
         true
     }
 
+    /// True if the slice has no audio in it.
     pub fn is_empty(&self) -> bool {
         self.start_time.is_none() && self.audio.is_empty()
     }
 
+    /// Adds the given audio to the slice, resampling it from the
+    /// discord format to the whisper format.
+    /// If the slice is full, then the audio will be "silently" dropped.
     pub fn add_audio(
         &mut self,
         rtc_timestamp: DiscordRtcTimestamp,
@@ -224,8 +219,41 @@ impl AudioSlice {
         }
     }
 
+    /// Returns the length of the audio stored in the buffer,
+    /// in units of time.
     pub fn buffer_duration(&self) -> Duration {
         samples_to_duration(self.audio.len())
+    }
+
+    /// Returns true only if the period from [start, start + interval_length] contains
+    /// only silence.  If none of the period is in the buffer, then this returns false.
+    /// If only part of the period is in the buffer, and all of that period is silence,
+    /// then this returns true.
+    pub fn is_interval_silent(&self, start: &Duration, interval_length: &Duration) -> bool {
+        // figures out where the end of the message's audio is
+        // in the current buffer.  Then checks for a period of
+        // up to USER_SILENCE_TIMEOUT beyond that point.
+        // If we reach the end of that period without seeing
+        // any non-silence, we can return the tentative transcript
+        // immediately, and this function will return true.
+        // Otherwise, it returns false.
+
+        let start_idx = start.as_millis() as usize * WHISPER_SAMPLES_PER_MILLISECOND;
+        let end_of_silence_interval =
+            start_idx + interval_length.as_millis() as usize * WHISPER_SAMPLES_PER_MILLISECOND;
+
+        if self.audio.len() <= start_idx {
+            eprintln!(
+                "{}: silence start interval not within buffer",
+                self.slice_id
+            );
+            return false;
+        }
+
+        let end_idx = min(end_of_silence_interval, self.audio.len());
+        self.audio[start_idx..end_idx]
+            .iter()
+            .all(|&sample| sample == WhisperAudioSample::default())
     }
 }
 
@@ -316,5 +344,63 @@ mod tests {
 
         // make sure the buffer didn't grow
         assert!(slice.audio.capacity() <= original_capacity);
+    }
+
+    #[test]
+    fn test_is_interval_silent() {
+        let mut slice = AudioSlice::new(345);
+        let start_rtc = Wrapping(1000 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32);
+
+        slice.start_time = Some((start_rtc, SystemTime::now()));
+
+        const STEREO_SAMPLES_PER_SECOND: usize =
+            1 * DISCORD_SAMPLES_PER_SECOND * DISCORD_AUDIO_CHANNELS;
+
+        const SILENT_DISCORD_AUDIO: [DiscordAudioSample; STEREO_SAMPLES_PER_SECOND] =
+            [0; STEREO_SAMPLES_PER_SECOND];
+
+        const NOISY_DISCORD_AUDIO: [DiscordAudioSample; STEREO_SAMPLES_PER_SECOND] =
+            [123; STEREO_SAMPLES_PER_SECOND];
+
+        const ONE_SECOND_RTC: Wrapping<u32> =
+            Wrapping(1000 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32);
+
+        const ONE_SECOND: Duration = Duration::from_secs(1);
+
+        const ONE_MS: Duration = Duration::from_millis(1);
+
+        // seconds [0,1) will be silent, since we'll auto-pad with silence
+        // seconds [1,2) are silent
+        assert_eq!(slice.buffer_duration(), Duration::ZERO);
+
+        slice.add_audio(start_rtc + ONE_SECOND_RTC, &SILENT_DISCORD_AUDIO);
+        assert_eq!(slice.buffer_duration(), 2 * ONE_SECOND);
+
+        // seconds [2,3) are noisy
+        slice.add_audio(
+            start_rtc + ONE_SECOND_RTC + ONE_SECOND_RTC,
+            &NOISY_DISCORD_AUDIO,
+        );
+        assert_eq!(slice.buffer_duration(), 3 * ONE_SECOND);
+
+        // seconds [3,4) are silent again
+        slice.add_audio(
+            start_rtc + ONE_SECOND_RTC + ONE_SECOND_RTC + ONE_SECOND_RTC,
+            &SILENT_DISCORD_AUDIO,
+        );
+        assert_eq!(slice.buffer_duration(), 4 * ONE_SECOND);
+
+        assert!(slice.is_interval_silent(&Duration::ZERO, &ONE_SECOND));
+        assert!(slice.is_interval_silent(&(ONE_SECOND / 2), &ONE_SECOND));
+        assert!(slice.is_interval_silent(&(1 * ONE_SECOND), &ONE_SECOND));
+        //assert!(!slice.is_interval_silent(&(3 * ONE_SECOND / 2), &ONE_SECOND));
+        assert!(!slice.is_interval_silent(&(2 * ONE_SECOND), &ONE_SECOND));
+        assert!(slice.is_interval_silent(&(3 * ONE_SECOND), &ONE_SECOND));
+
+        // not silent since entirely outside buffer
+        assert!(!slice.is_interval_silent(&(4 * ONE_SECOND), &ONE_SECOND));
+
+        // starts within buffer, so silent
+        assert!(slice.is_interval_silent(&(4 * ONE_SECOND - ONE_MS), &ONE_SECOND));
     }
 }
