@@ -22,3 +22,6 @@ pub(crate) const DISCARD_USER_AUDIO_AFTER: Duration = Duration::from_secs(10 * 6
 /// We won't AUTOMATICALLY start a new transcription when the user goes
 /// silent if we did so already within this interval.
 pub(crate) const SILENT_TIMEOUT: Duration = Duration::from_secs(5);
+
+pub(crate) const WHISPER_SAMPLES_PER_SECOND: usize = 16000;
+pub(crate) const WHISPER_SAMPLES_PER_MILLISECOND: usize = 16;

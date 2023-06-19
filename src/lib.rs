@@ -17,6 +17,7 @@ pub mod model {
     pub(crate) mod audio_manager;
     pub(crate) mod audio_slice;
     pub(crate) mod constants;
+    pub(crate) mod transcript_director;
     pub mod types;
     pub(crate) mod voice_activity;
 }
