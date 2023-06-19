@@ -4,6 +4,8 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+use bytes::Bytes;
+
 use crate::model::constants::WHISPER_SAMPLES_PER_MILLISECOND;
 
 use super::{
@@ -182,6 +184,14 @@ impl AudioSlice {
                 .sum::<types::WhisperAudioSample>()
                 / DISCORD_AUDIO_MAX_VALUE_TWO_SAMPLES;
         }
+    }
+
+    pub fn get_bytes(&self) -> Bytes {
+        let buffer = self.audio.as_slice();
+        let buffer_len_bytes = std::mem::size_of_val(buffer);
+        let byte_data =
+            unsafe { std::slice::from_raw_parts(buffer.as_ptr() as *const u8, buffer_len_bytes) };
+        Bytes::from(byte_data)
     }
 
     /// Discards the amount of audio specified by the duration

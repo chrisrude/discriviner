@@ -181,10 +181,8 @@ impl TranscriptDirector {
             }
             self.last_request = Some(new_request);
 
-            let buffer = self.slice.audio.as_slice();
-
             return Some(TranscriptionRequest {
-                audio_data: Vec::from(buffer),
+                audio_bytes: self.slice.get_bytes(),
                 audio_duration: duration,
                 previous_tokens: Vec::from(self.last_tokens.clone()),
                 start_timestamp: start_time,

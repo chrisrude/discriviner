@@ -1,5 +1,6 @@
 use std::{path::Path, sync::Arc};
 
+use bytes::Bytes;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperToken};
 
 use crate::events::audio::{TranscriptionRequest, TranscriptionResponse};
@@ -30,7 +31,7 @@ impl Whisper {
     pub(crate) async fn process_transcription_request(
         &self,
         TranscriptionRequest {
-            audio_data,
+            audio_bytes,
             audio_duration,
             previous_tokens,
             start_timestamp,
@@ -40,7 +41,7 @@ impl Whisper {
         let processing_start = std::time::Instant::now();
         let whisper_context_clone = self.whisper_context.clone();
         let conversion_task = tokio::task::spawn_blocking(move || {
-            Self::audio_to_text(&whisper_context_clone, audio_data, previous_tokens)
+            Self::audio_to_text(&whisper_context_clone, audio_bytes, previous_tokens)
         });
 
         let segments = conversion_task.await.unwrap();
@@ -62,14 +63,23 @@ impl Whisper {
     /// audio data should be is f32, 16KHz, mono
     fn audio_to_text(
         whisper_context: &WhisperContext,
-        audio_data: Vec<WhisperAudioSample>,
+        audio_bytes: Bytes,
         previous_tokens: Vec<WhisperToken>,
     ) -> Vec<TextSegment> {
+        let audio_len_bytes = audio_bytes.len();
+        let audio_len_samples = audio_len_bytes / std::mem::size_of::<WhisperAudioSample>();
+        let audio_data = unsafe {
+            std::slice::from_raw_parts(
+                audio_bytes.as_ptr() as *const WhisperAudioSample,
+                audio_len_samples,
+            )
+        };
+
         let mut state = whisper_context.create_state().unwrap();
 
         // actually convert audio to text.  Takes a while.
         state
-            .full(Self::make_params(&previous_tokens), audio_data.as_slice())
+            .full(Self::make_params(&previous_tokens), audio_data)
             .unwrap();
 
         let num_segments = state.full_n_segments().unwrap();

@@ -4,11 +4,10 @@
 
 use std::time::{Duration, SystemTime};
 
+use bytes::Bytes;
 use whisper_rs::WhisperToken;
 
-use crate::model::types::{
-    DiscordAudioSample, DiscordRtcTimestamp, Transcription, UserId, WhisperAudioSample,
-};
+use crate::model::types::{DiscordAudioSample, DiscordRtcTimestamp, Transcription, UserId};
 
 #[derive(Debug)]
 pub(crate) struct DiscordAudioData {
@@ -26,7 +25,7 @@ pub struct VoiceActivityData {
 
 #[derive(Debug)]
 pub(crate) struct TranscriptionRequest {
-    pub audio_data: Vec<WhisperAudioSample>,
+    pub audio_bytes: Bytes,
     pub audio_duration: Duration,
     pub previous_tokens: Vec<WhisperToken>,
     pub start_timestamp: SystemTime,
