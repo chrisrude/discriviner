@@ -25,3 +25,6 @@ pub(crate) const SILENT_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(crate) const WHISPER_SAMPLES_PER_SECOND: usize = 16000;
 pub(crate) const WHISPER_SAMPLES_PER_MILLISECOND: usize = 16;
+
+// todo: what's a good value here?
+pub(crate) const MAX_LAG: Duration = Duration::from_secs(3);

@@ -5,7 +5,7 @@ use std::{
 
 use whisper_rs::WhisperToken;
 
-use crate::events::audio::TranscriptionRequest;
+use crate::{events::audio::TranscriptionRequest, model::constants::MAX_LAG};
 
 /// Determines when transcriptions should be attempted,
 /// and sends the results to the API.
@@ -240,10 +240,10 @@ impl TranscriptDirector {
     fn shortcut_tentative_transcripts(&self, message: &Transcription) -> bool {
         // has enough time elapsed since the last request that we can
         // expect audio to have been in the buffer?
-        let time_since_request = SystemTime::now()
-            .duration_since(self.last_request.as_ref().unwrap().requested_at)
-            .unwrap();
-        if time_since_request < USER_SILENCE_TIMEOUT {
+        let end_of_transcript = message.start_timestamp + message.audio_duration;
+        let time_since_transcript_end =
+            SystemTime::now().duration_since(end_of_transcript).unwrap();
+        if time_since_transcript_end < USER_SILENCE_TIMEOUT {
             eprintln!("{} too soon to fast-track", self.slice_id);
             return false;
         }
@@ -257,6 +257,10 @@ impl TranscriptDirector {
         &mut self,
         message: &Transcription,
     ) -> Option<Transcription> {
+        eprintln!(
+            "{}: processing time was {:?}",
+            self.slice_id, message.processing_time
+        );
         // if we had more than one request in flight, we need to
         // ignore all but the latest
         if let Some(last_request) = self.last_request.as_ref() {
@@ -281,6 +285,16 @@ impl TranscriptDirector {
             return None;
         }
         self.last_request.as_mut().unwrap().in_progress = false;
+
+        let lag = SystemTime::now()
+            .duration_since(message.start_timestamp + message.audio_duration)
+            .unwrap();
+        eprintln!("{}: lag was {:?}", self.slice_id, lag);
+        if lag > MAX_LAG {
+            for _ in 0..10 {
+                eprintln!("{}: the lag is too damn high!!!", self.slice_id);
+            }
+        }
 
         // todo: by this point more audio has been received, so we
         // have the data to know if the ends of our tentative segments
