@@ -229,6 +229,8 @@ impl AudioSlice {
     /// only silence.  If none of the period is in the buffer, then this returns false.
     /// If only part of the period is in the buffer, and all of that period is silence,
     /// then this returns true.
+    /// The one exception is for when the start period is one sample beyond the
+    /// end of the buffer, in which case this returns true.
     pub fn is_interval_silent(&self, start: &Duration, interval_length: &Duration) -> bool {
         // figures out where the end of the message's audio is
         // in the current buffer.  Then checks for a period of
@@ -242,6 +244,8 @@ impl AudioSlice {
         let end_of_silence_interval =
             start_idx + interval_length.as_millis() as usize * WHISPER_SAMPLES_PER_MILLISECOND;
 
+        // we intentionally allow the start index to be one sample beyond the end of the buffer,
+        // as this is the expected case where the user actually goes silent.
         if self.audio.len() <= start_idx {
             eprintln!(
                 "{}: silence start interval not within buffer",
@@ -367,8 +371,6 @@ mod tests {
 
         const ONE_SECOND: Duration = Duration::from_secs(1);
 
-        const ONE_MS: Duration = Duration::from_millis(1);
-
         // seconds [0,1) will be silent, since we'll auto-pad with silence
         // seconds [1,2) are silent
         assert_eq!(slice.buffer_duration(), Duration::ZERO);
@@ -400,7 +402,13 @@ mod tests {
         // not silent since entirely outside buffer
         assert!(!slice.is_interval_silent(&(4 * ONE_SECOND), &ONE_SECOND));
 
-        // starts within buffer, so silent
-        assert!(slice.is_interval_silent(&(4 * ONE_SECOND - ONE_MS), &ONE_SECOND));
+        let duration_buffer_len_minus_one = samples_to_duration(slice.audio.len() - 1);
+        assert!(slice.is_interval_silent(&duration_buffer_len_minus_one, &ONE_SECOND));
+
+        let duration_buffer_len = samples_to_duration(slice.audio.len());
+        assert!(!slice.is_interval_silent(&duration_buffer_len, &ONE_SECOND));
+
+        let duration_buffer_len_plus_one = samples_to_duration(slice.audio.len() + 1);
+        assert!(!slice.is_interval_silent(&duration_buffer_len_plus_one, &ONE_SECOND));
     }
 }

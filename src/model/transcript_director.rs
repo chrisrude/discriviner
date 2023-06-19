@@ -243,7 +243,8 @@ impl TranscriptDirector {
         let time_since_request = SystemTime::now()
             .duration_since(self.last_request.as_ref().unwrap().requested_at)
             .unwrap();
-        if time_since_request < SILENT_TIMEOUT {
+        if time_since_request < USER_SILENCE_TIMEOUT {
+            eprintln!("{} too soon to fast-track", self.slice_id);
             return false;
         }
 
