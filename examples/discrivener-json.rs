@@ -31,6 +31,7 @@ async fn tokio_main(cli: Cli) {
     }
 
     signal::ctrl_c().await.unwrap();
+    eprintln!("Disconnecting...");
     discrivener.disconnect().await;
 }
 

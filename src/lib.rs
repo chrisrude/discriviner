@@ -80,6 +80,7 @@ impl Discrivener {
 
         let api_task = Some(tokio::spawn(Self::start_api_task(
             rx_api_events,
+            shutdown_token.clone(),
             event_callback,
         )));
 
@@ -113,25 +114,40 @@ impl Discrivener {
     }
 
     pub async fn disconnect(&mut self) {
+        eprintln!("Driver leaving");
         self.driver.leave();
+        eprintln!("Setting shutdown token");
         self.shutdown_token.cancel();
 
         // join all our tasks
+        eprintln!("Waiting for tasks to finish");
         self.api_task.take().unwrap().await.unwrap();
+        eprintln!("API task complete");
         self.audio_buffer_manager_task
             .take()
             .unwrap()
             .await
             .unwrap();
+        eprintln!("Audio buffer manager task complete");
         self.voice_activity_task.take().unwrap().await.unwrap();
+        eprintln!("Voice activity task complete");
     }
 
     async fn start_api_task(
         mut rx_api_events: tokio::sync::mpsc::UnboundedReceiver<VoiceChannelEvent>,
+        shutdown_token: CancellationToken,
         event_callback: std::sync::Arc<dyn Fn(VoiceChannelEvent) + Send + Sync>,
     ) {
-        while let Some(event) = rx_api_events.recv().await {
-            event_callback(event);
+        // wait for either shutdown token or rx_api_events
+        loop {
+            tokio::select! {
+                _ = shutdown_token.cancelled() => {
+                    return;
+                }
+                Some(event) = rx_api_events.recv() => {
+                    event_callback(event);
+                }
+            }
         }
     }
 }

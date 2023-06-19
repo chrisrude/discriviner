@@ -236,12 +236,12 @@ pub(crate) fn register_events(raw_handler: PacketHandler, driver: &mut songbird:
             packet_handler: handler.clone(),
             handler: |ctx, my_handler| {
                 if let EventContext::DriverDisconnect(disconnect_data) = ctx {
-                    my_handler
-                        .tx_api_events
-                        .send(VoiceChannelEvent::Disconnect(DisconnectData::from(
-                            disconnect_data,
-                        )))
-                        .unwrap();
+                    let result = my_handler.tx_api_events.send(VoiceChannelEvent::Disconnect(
+                        DisconnectData::from(disconnect_data),
+                    ));
+                    if result.is_err() {
+                        eprintln!("Disconnect event not sent (expected when exiting)");
+                    }
                 }
             },
         },
