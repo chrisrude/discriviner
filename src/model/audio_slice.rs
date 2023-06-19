@@ -1,13 +1,18 @@
 use std::{
     cmp::{max, min},
+    collections::VecDeque,
     num::Wrapping,
     time::{Duration, Instant, SystemTime},
 };
 
+use whisper_rs::WhisperToken;
+
+use crate::events::audio::TranscriptionRequest;
+
 use super::{
     constants::{
         AUDIO_TO_RECORD, AUDIO_TO_RECORD_SECONDS, AUTO_TRANSCRIPTION_PERIOD_MS, SILENT_TIMEOUT,
-        USER_SILENCE_TIMEOUT,
+        TOKENS_TO_KEEP, USER_SILENCE_TIMEOUT,
     },
     types::{
         self, DiscordAudioSample, DiscordRtcTimestamp, DiscordRtcTimestampInner, Transcription,
@@ -72,33 +77,39 @@ impl LastRequestInfo {
 
 pub(crate) struct AudioSlice {
     pub audio: Vec<WhisperAudioSample>,
-    pub finalized: bool,
+    pub user_idle: bool,
     pub last_request: Option<LastRequestInfo>,
     pub slice_id: u64,
     pub start_time: Option<(DiscordRtcTimestamp, SystemTime)>,
     pub tentative_transcript_opt: Option<Transcription>,
     pub user_silent: bool,
     pub last_silent_time: Instant,
+
+    /// The most recent tokens we've seen from this
+    /// user.  Used to help inform the decoder.
+    /// Maximum length is TOKENS_TO_KEEP.
+    pub last_tokens: std::collections::VecDeque<WhisperToken>,
 }
 
 impl AudioSlice {
     pub fn new(slice_id: u64) -> Self {
         Self {
             audio: Vec::with_capacity(WHISPER_AUDIO_BUFFER_SIZE),
-            finalized: false,
+            user_idle: false,
             last_request: None,
             slice_id,
             start_time: None,
             tentative_transcript_opt: None,
             user_silent: false,
             last_silent_time: Instant::now(),
+            last_tokens: VecDeque::with_capacity(TOKENS_TO_KEEP),
         }
     }
 
     pub fn clear(&mut self) {
         eprintln!("{}: clearing audio slice", self.slice_id);
         self.audio.clear();
-        self.finalized = false;
+        self.user_idle = false;
         self.last_request = None;
         self.start_time = None;
         self.tentative_transcript_opt = None;
@@ -168,7 +179,7 @@ impl AudioSlice {
             );
             return;
         }
-        self.finalized = false;
+        self.user_idle = false;
 
         let start_index;
         if let Some((start_rtc, _)) = self.start_time {
@@ -233,8 +244,8 @@ impl AudioSlice {
             return false;
         }
 
-        if self.finalized {
-            // the slice is finalized, but we haven't requested the full
+        if self.user_idle {
+            // the slice is user_idle, but we haven't requested the full
             // buffer yet, so request it
             return true;
         }
@@ -272,9 +283,7 @@ impl AudioSlice {
         last_period != current_period
     }
 
-    pub fn make_transcription_request(
-        &mut self,
-    ) -> Option<(Vec<WhisperAudioSample>, Duration, SystemTime)> {
+    pub fn make_transcription_request(&mut self) -> Option<TranscriptionRequest> {
         if !self.is_ready_for_transcription() {
             return None;
         }
@@ -291,7 +300,7 @@ impl AudioSlice {
                 original_duration: self.buffer_duration(),
                 in_progress: true,
                 requested_at: SystemTime::now(),
-                final_request: self.finalized,
+                final_request: self.user_idle,
             };
             if let Some(last_request) = self.last_request.as_ref() {
                 if last_request.start_time == new_request.start_time
@@ -313,9 +322,26 @@ impl AudioSlice {
 
             let buffer = self.audio.as_slice();
 
-            return Some((Vec::from(buffer), duration, start_time));
+            return Some(TranscriptionRequest {
+                audio_data: Vec::from(buffer),
+                audio_duration: duration,
+                previous_tokens: Vec::from(self.last_tokens.clone()),
+                start_timestamp: start_time,
+                user_id: self.slice_id,
+            });
         }
         None
+    }
+
+    fn add_tokens(&mut self, message: &Transcription) {
+        for segment in message.segments.iter() {
+            for token in &segment.tokens_with_probability {
+                self.last_tokens.push_back(token.token_id);
+                if self.last_tokens.len() > TOKENS_TO_KEEP {
+                    self.last_tokens.pop_front();
+                }
+            }
+        }
     }
 
     /// Discards the amount of audio specified by the duration
@@ -359,8 +385,8 @@ impl AudioSlice {
         }
     }
 
-    pub fn finalize(&mut self) -> Option<Transcription> {
-        self.finalized = true;
+    pub fn handle_user_idle(&mut self) -> Option<Transcription> {
+        self.user_idle = true;
 
         eprintln!(
             "finalizing slice with {} ms of audio",
@@ -418,7 +444,7 @@ impl AudioSlice {
             return false;
         }
 
-        if (self.audio.len() < end_of_silence_interval) && !self.finalized {
+        if (self.audio.len() < end_of_silence_interval) && !self.user_idle {
             eprintln!("{}: not enough audio for silence interval", self.slice_id);
             return false;
         }
@@ -489,33 +515,33 @@ impl AudioSlice {
         } else {
             self.last_request.as_ref().unwrap().requested_at - USER_SILENCE_TIMEOUT
         };
-        let (finalized_transcript, tentative_transcript) =
+        let (user_idle_transcript, tentative_transcript) =
             Transcription::split_at_end_time(message, end_time);
-        // if self.finalized {
+        // if self.user_idle {
         //     assert!(tentative_transcript.is_empty());
         // }
         assert_eq!(
-            finalized_transcript.audio_duration + tentative_transcript.audio_duration,
+            user_idle_transcript.audio_duration + tentative_transcript.audio_duration,
             message.audio_duration
         );
         // todo: check to see if the tentative transcription is accurate
 
         eprintln!(
             "have transcription: {} final segments ({} ms), {} tentative segments ({} ms)",
-            finalized_transcript.segments.len(),
-            finalized_transcript.audio_duration.as_millis(),
+            user_idle_transcript.segments.len(),
+            user_idle_transcript.audio_duration.as_millis(),
             tentative_transcript.segments.len(),
             tentative_transcript.audio_duration.as_millis(),
         );
 
-        // eprintln!("finalized transcription: '{}'", finalized_transcript.text(),);
+        // eprintln!("user_idle transcription: '{}'", user_idle_transcript.text(),);
         // eprintln!("tentative transcription: '{}'", tentative_transcript.text(),);
 
-        // with our finalized transcription, we can now discard
+        // with our user_idle transcription, we can now discard
         // the audio that was used to generate it.  Be sure to
         // only discard exactly as much audio as was represented
-        // by the finalized transcription, or the times will not line up.
-        self.discard_audio(&finalized_transcript.audio_duration);
+        // by the user_idle transcription, or the times will not line up.
+        self.discard_audio(&user_idle_transcript.audio_duration);
 
         // if the remaining audio length is the same as the tentative
         // transcription, that means no new audio has arrived in the
@@ -535,10 +561,11 @@ impl AudioSlice {
             self.tentative_transcript_opt = None;
         }
 
-        if finalized_transcript.is_empty() {
+        if user_idle_transcript.is_empty() {
             None
         } else {
-            Some(finalized_transcript)
+            self.add_tokens(&user_idle_transcript);
+            Some(user_idle_transcript)
         }
     }
 }

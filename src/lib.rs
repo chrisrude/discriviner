@@ -18,7 +18,6 @@ pub mod model {
     pub(crate) mod audio_slice;
     pub(crate) mod constants;
     pub mod types;
-    pub(crate) mod user_audio;
     pub(crate) mod voice_activity;
 }
 mod packet_handler;

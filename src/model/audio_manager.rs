@@ -18,8 +18,8 @@ use crate::{
 
 use super::{
     super::Whisper,
+    audio_slice::AudioSlice,
     types::{self, VoiceChannelEvent},
-    user_audio::UserAudio,
 };
 
 /// Handles a set of audio buffers, one for each user who is
@@ -30,7 +30,7 @@ pub(crate) struct AudioManager {
     // period of time after the user has stopped talking.
     // The tuple stored is:
     //   (time of last activity, buffer)
-    user_audio_map: HashMap<types::UserId, (Instant, UserAudio)>,
+    user_audio_map: HashMap<types::UserId, (Instant, AudioSlice)>,
 
     // we'll have a single task which monitors this queue for new
     // audio data and then pushes it into the appropriate buffer.
@@ -71,12 +71,12 @@ impl<'a> AudioManager {
     fn with_buffer_for_user(
         &mut self,
         user_id: types::UserId,
-        mut yield_fn: impl FnMut(&mut UserAudio),
+        mut yield_fn: impl FnMut(&mut AudioSlice),
     ) {
         // insert a new buffer if we don't have one for this user
         let (last_activity, buffer) = match self.user_audio_map.entry(user_id) {
             Entry::Occupied(entry) => entry.into_mut(),
-            Entry::Vacant(entry) => entry.insert((Instant::now(), UserAudio::new(user_id))),
+            Entry::Vacant(entry) => entry.insert((Instant::now(), AudioSlice::new(user_id))),
         };
         (yield_fn)(buffer);
         *last_activity = Instant::now();
@@ -89,9 +89,9 @@ impl<'a> AudioManager {
     fn maybe_request_transcription(
         whisper: &Arc<Whisper>,
         pending_requests: &mut FuturesUnordered<JoinHandle<TranscriptionResponse>>,
-        buffer: &mut UserAudio,
+        buffer: &mut AudioSlice,
     ) {
-        if let Some(request) = buffer.try_get_transcription_request() {
+        if let Some(request) = buffer.make_transcription_request() {
             let whisper_clone = whisper.clone();
             let join_handle =
                 tokio::spawn(
