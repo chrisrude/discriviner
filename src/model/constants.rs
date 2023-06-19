@@ -17,3 +17,8 @@ pub(crate) const USER_SILENCE_TIMEOUT: Duration =
     Duration::from_millis(USER_SILENCE_TIMEOUT_MS as u64);
 
 pub(crate) const DISCARD_USER_AUDIO_AFTER: Duration = Duration::from_secs(10 * 60);
+
+/// Hysteresis for the decoding that's triggered when a user goes silent.
+/// We won't AUTOMATICALLY start a new transcription when the user goes
+/// silent if we did so already within this interval.
+pub(crate) const SILENT_TIMEOUT: Duration = Duration::from_secs(5);

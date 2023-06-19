@@ -1,12 +1,12 @@
 use std::{
-    cmp::max,
+    cmp::{max, min},
     num::Wrapping,
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 
 use super::{
     constants::{
-        AUDIO_TO_RECORD, AUDIO_TO_RECORD_SECONDS, AUTO_TRANSCRIPTION_PERIOD_MS,
+        AUDIO_TO_RECORD, AUDIO_TO_RECORD_SECONDS, AUTO_TRANSCRIPTION_PERIOD_MS, SILENT_TIMEOUT,
         USER_SILENCE_TIMEOUT,
     },
     types::{
@@ -78,6 +78,7 @@ pub(crate) struct AudioSlice {
     pub start_time: Option<(DiscordRtcTimestamp, SystemTime)>,
     pub tentative_transcript_opt: Option<Transcription>,
     pub user_silent: bool,
+    pub last_silent_time: Instant,
 }
 
 impl AudioSlice {
@@ -90,6 +91,7 @@ impl AudioSlice {
             start_time: None,
             tentative_transcript_opt: None,
             user_silent: false,
+            last_silent_time: Instant::now(),
         }
     }
 
@@ -226,7 +228,7 @@ impl AudioSlice {
         }
     }
 
-    fn is_ready_for_transcription(&self) -> bool {
+    fn is_ready_for_transcription(&mut self) -> bool {
         if self.start_time.is_none() {
             return false;
         }
@@ -246,11 +248,16 @@ impl AudioSlice {
         }
 
         if self.user_silent {
-            // if the user is silent, then we need to request the full
-            // buffer, even if no period shift has occurred
-            // in this case we'll have two outstanding transcription
-            // requests...
-            return true;
+            if self.last_silent_time.elapsed() > SILENT_TIMEOUT {
+                // if the user is silent, then we need to request the full
+                // buffer, even if no period shift has occurred
+                // in this case we'll have two outstanding transcription
+                // requests...
+                self.last_silent_time = Instant::now();
+                return true;
+            } else {
+                eprintln!("{}: user is silent, but not requesting transcription due to hysteresis prevention", self.slice_id);
+            }
         }
 
         let current_period = self.buffer_duration().as_millis() / AUTO_TRANSCRIPTION_PERIOD_MS;
@@ -388,6 +395,44 @@ impl AudioSlice {
         samples_to_duration(self.audio.len())
     }
 
+    fn shortcut_tentative_transcripts(&self, message: &Transcription) -> bool {
+        // figures out where the end of the message's audio is
+        // in the current buffer.  Then checks for a period of
+        // up to USER_SILENCE_TIMEOUT beyond that point.
+        // If we reach the end of that period without seeing
+        // any non-silence, we can return the tentative transcript
+        // immediately, and this function will return true.
+        // Otherwise, it returns false.
+        let now = SystemTime::now();
+        if message.start_timestamp + message.audio_duration + USER_SILENCE_TIMEOUT > now {
+            // the future hasn't happened yet
+            return false;
+        }
+
+        let end_idx = message.audio_duration.as_millis() as usize * WHISPER_SAMPLES_PER_MILLISECOND;
+        let end_of_silence_interval =
+            end_idx + USER_SILENCE_TIMEOUT.as_millis() as usize * WHISPER_SAMPLES_PER_MILLISECOND;
+
+        if self.audio.len() < end_idx {
+            eprintln!("{}: not enough audio for shortcut", self.slice_id);
+            return false;
+        }
+
+        if (self.audio.len() < end_of_silence_interval) && !self.finalized {
+            eprintln!("{}: not enough audio for silence interval", self.slice_id);
+            return false;
+        }
+
+        let end_of_search = min(self.audio.len(), end_of_silence_interval);
+        // look through [end_idx, end_of_search) for non-silence
+        let has_non_silence = self.audio[end_idx..end_of_search]
+            .iter()
+            .any(|&sample| sample != WhisperAudioSample::default());
+
+        // if we found non-silence, we can't shortcut, otherwise we can
+        !has_non_silence
+    }
+
     pub fn handle_transcription_response(
         &mut self,
         message: &Transcription,
@@ -416,6 +461,20 @@ impl AudioSlice {
             return None;
         }
         self.last_request.as_mut().unwrap().in_progress = false;
+
+        // todo: by this point more audio has been received, so we
+        // have the data to know if the ends of our tentative segments
+        // were followed by silence or not.  If not, we should discard
+        // the tentative segments, but if they were, we can finalize
+        // them now.
+        // for now, just do this on a full-transcript basis, but it should
+        // also be possible to do per-segment.
+        if self.shortcut_tentative_transcripts(message) {
+            eprintln!("fast-tracking tentative transcripts");
+            self.tentative_transcript_opt = None;
+            self.discard_audio(&message.audio_duration);
+            return Some(message.clone());
+        }
 
         // figure out how many segments have an end time that's more
         // than USER_SILENCE_TIMEOUT ago.  Those will be returned to
