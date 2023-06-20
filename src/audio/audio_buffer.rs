@@ -41,13 +41,13 @@ fn samples_to_duration(num_samples: usize) -> Duration {
     Duration::from_millis((num_samples / WHISPER_SAMPLES_PER_MILLISECOND) as u64)
 }
 
-pub(crate) struct AudioSlice {
+pub(crate) struct AudioBuffer {
     pub audio: Vec<WhisperAudioSample>,
     pub slice_id: u64,
     pub start_time: Option<(DiscordRtcTimestamp, SystemTime)>,
 }
 
-impl AudioSlice {
+impl AudioBuffer {
     pub fn new(slice_id: u64) -> Self {
         Self {
             audio: Vec::with_capacity(WHISPER_AUDIO_BUFFER_SIZE),
@@ -272,7 +272,7 @@ mod tests {
 
     #[test]
     fn test_discard_audio() {
-        let mut slice = AudioSlice::new(123);
+        let mut slice = AudioBuffer::new(123);
         slice.start_time = Some((
             Wrapping(1000 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32),
             SystemTime::now(),
@@ -291,7 +291,7 @@ mod tests {
     const DISCORD_SAMPLES_PER_MILLISECOND: usize = DISCORD_SAMPLES_PER_SECOND / 1000;
     #[test]
     fn test_add_audio() {
-        let mut slice = AudioSlice::new(234);
+        let mut slice = AudioBuffer::new(234);
         slice.start_time = Some((
             Wrapping(1000 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32),
             SystemTime::now(),
@@ -356,7 +356,7 @@ mod tests {
 
     #[test]
     fn test_is_interval_silent() {
-        let mut slice = AudioSlice::new(345);
+        let mut slice = AudioBuffer::new(345);
         let start_rtc = Wrapping(1000 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32);
 
         slice.start_time = Some((start_rtc, SystemTime::now()));

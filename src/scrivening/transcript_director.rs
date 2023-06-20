@@ -6,7 +6,7 @@ use std::{
 use whisper_rs::WhisperToken;
 
 use crate::{
-    audio::{audio_buffer::AudioSlice, events::TranscriptionRequest},
+    audio::{audio_buffer::AudioBuffer, events::TranscriptionRequest},
     model::{
         constants::{
             AUTO_TRANSCRIPTION_PERIOD_MS, MAX_LAG, SILENT_TIMEOUT, TOKENS_TO_KEEP,
@@ -47,7 +47,7 @@ pub(crate) struct TranscriptDirector {
     /// Maximum length is TOKENS_TO_KEEP.
     pub last_tokens: std::collections::VecDeque<WhisperToken>,
 
-    pub slice: AudioSlice,
+    pub slice: AudioBuffer,
 }
 
 impl TranscriptDirector {
@@ -55,7 +55,7 @@ impl TranscriptDirector {
         Self {
             user_idle: false,
             last_request: None,
-            slice: AudioSlice::new(slice_id),
+            slice: AudioBuffer::new(slice_id),
             slice_id,
             tentative_transcript_opt: None,
             user_silent: false,
