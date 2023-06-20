@@ -130,7 +130,7 @@ impl AudioBuffer {
         } else {
             // this is the first audio for the slice, so we need to set
             // the start time
-            self.start_time = Some((rtc_timestamp.clone(), SystemTime::now()));
+            self.start_time = Some((*rtc_timestamp, SystemTime::now()));
             start_index = 0;
         }
 

@@ -92,11 +92,6 @@ impl VoiceActivity {
         let (_, user_id, last_time) = self.silence_list.pop_front().unwrap();
         // is the current most recent speaking time the same as last_time?
         // if so, then the user has been silent the whole time
-        println!("last_time: {:?}", last_time);
-        println!(
-            "last_time_actual: {:?}",
-            self.last_time_by_user.get(&user_id)
-        );
         if let Some((speaking, last_time_actual)) = self.last_time_by_user.get(&user_id) {
             if !*speaking && last_time == *last_time_actual {
                 // user has been silent the whole time
@@ -181,12 +176,9 @@ mod tests {
         );
 
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
-        assert_eq!(
-            rx_silent_user
-                .try_recv()
-                .is_err_and(|x| TryRecvError::Empty.eq(&x)),
-            true
-        );
+        assert!(rx_silent_user
+            .try_recv()
+            .is_err_and(|x| TryRecvError::Empty.eq(&x)));
 
         // user 1 starts talking
         tx.send(UserAudioEvent {
@@ -201,12 +193,9 @@ mod tests {
             panic!("expected silent channel event");
         }
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
-        assert_eq!(
-            rx_silent_user
-                .try_recv()
-                .is_err_and(|x| TryRecvError::Empty.eq(&x)),
-            true
-        );
+        assert!(rx_silent_user
+            .try_recv()
+            .is_err_and(|x| TryRecvError::Empty.eq(&x)));
 
         // user 2 starts talking
         tx.send(UserAudioEvent {
@@ -215,12 +204,9 @@ mod tests {
         })
         .unwrap();
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
-        assert_eq!(
-            rx_silent_user
-                .try_recv()
-                .is_err_and(|x| TryRecvError::Empty.eq(&x)),
-            true
-        );
+        assert!(rx_silent_user
+            .try_recv()
+            .is_err_and(|x| TryRecvError::Empty.eq(&x)));
 
         // user 1 stops talking
         tx.send(UserAudioEvent {
@@ -229,7 +215,7 @@ mod tests {
         })
         .unwrap();
 
-        tokio::time::sleep(Duration::from_millis(2)).await;
+        tokio::time::sleep(Duration::from_millis(20)).await;
 
         assert!(rx_silent_user
             .try_recv()
@@ -238,12 +224,9 @@ mod tests {
             .try_recv()
             .is_ok_and(|x| (x.user_id == 1) && matches!(x.event_type, UserAudioEventType::Idle)));
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
-        assert_eq!(
-            rx_silent_user
-                .try_recv()
-                .is_err_and(|x| TryRecvError::Empty.eq(&x)),
-            true
-        );
+        assert!(rx_silent_user
+            .try_recv()
+            .is_err_and(|x| TryRecvError::Empty.eq(&x)));
 
         // user 2 stops talking
         tx.send(UserAudioEvent {
@@ -252,7 +235,7 @@ mod tests {
         })
         .unwrap();
 
-        tokio::time::sleep(Duration::from_millis(2)).await;
+        tokio::time::sleep(Duration::from_millis(20)).await;
 
         assert!(rx_silent_user
             .try_recv()
@@ -266,12 +249,9 @@ mod tests {
             .try_recv()
             .is_ok_and(|x| (x.user_id == 2) && matches!(x.event_type, UserAudioEventType::Idle)));
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
-        assert_eq!(
-            rx_silent_user
-                .try_recv()
-                .is_err_and(|x| TryRecvError::Empty.eq(&x)),
-            true
-        );
+        assert!(rx_silent_user
+            .try_recv()
+            .is_err_and(|x| TryRecvError::Empty.eq(&x)));
 
         // close the sender, which will cause the loop to exit
         shutdown_token.cancel();
@@ -293,12 +273,9 @@ mod tests {
         );
 
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
-        assert_eq!(
-            rx_silent_user
-                .try_recv()
-                .is_err_and(|x| TryRecvError::Empty.eq(&x)),
-            true
-        );
+        assert!(rx_silent_user
+            .try_recv()
+            .is_err_and(|x| TryRecvError::Empty.eq(&x)));
 
         // user 1 starts talking
         tx.send(UserAudioEvent {
@@ -313,12 +290,9 @@ mod tests {
             panic!("expected silent channel event");
         }
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
-        assert_eq!(
-            rx_silent_user
-                .try_recv()
-                .is_err_and(|x| TryRecvError::Empty.eq(&x)),
-            true
-        );
+        assert!(rx_silent_user
+            .try_recv()
+            .is_err_and(|x| TryRecvError::Empty.eq(&x)));
 
         // user 2 starts talking
         tx.send(UserAudioEvent {
@@ -327,12 +301,9 @@ mod tests {
         })
         .unwrap();
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
-        assert_eq!(
-            rx_silent_user
-                .try_recv()
-                .is_err_and(|x| TryRecvError::Empty.eq(&x)),
-            true
-        );
+        assert!(rx_silent_user
+            .try_recv()
+            .is_err_and(|x| TryRecvError::Empty.eq(&x)));
 
         // user 1 stops talking
         tx.send(UserAudioEvent {
@@ -348,12 +319,9 @@ mod tests {
         assert!(rx_silent_user
             .try_recv()
             .is_ok_and(|x| (x.user_id == 1) && matches!(x.event_type, UserAudioEventType::Silent)));
-        assert_eq!(
-            rx_silent_user
-                .try_recv()
-                .is_err_and(|x| TryRecvError::Empty.eq(&x)),
-            true
-        );
+        assert!(rx_silent_user
+            .try_recv()
+            .is_err_and(|x| TryRecvError::Empty.eq(&x)));
 
         // now wait a while, and expect a timeout
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -362,12 +330,9 @@ mod tests {
             .try_recv()
             .is_ok_and(|x| (x.user_id == 1) && matches!(x.event_type, UserAudioEventType::Idle)));
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
-        assert_eq!(
-            rx_silent_user
-                .try_recv()
-                .is_err_and(|x| TryRecvError::Empty.eq(&x)),
-            true
-        );
+        assert!(rx_silent_user
+            .try_recv()
+            .is_err_and(|x| TryRecvError::Empty.eq(&x)));
 
         // user 2 stops talking
         tx.send(UserAudioEvent {
@@ -388,12 +353,9 @@ mod tests {
             panic!("expected silent channel event");
         }
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
-        assert_eq!(
-            rx_silent_user
-                .try_recv()
-                .is_err_and(|x| TryRecvError::Empty.eq(&x)),
-            true
-        );
+        assert!(rx_silent_user
+            .try_recv()
+            .is_err_and(|x| TryRecvError::Empty.eq(&x)));
 
         // before the timeout, user 2 starts talking again
         tx.send(UserAudioEvent {
@@ -411,12 +373,9 @@ mod tests {
             panic!("expected silent channel event");
         }
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
-        assert_eq!(
-            rx_silent_user
-                .try_recv()
-                .is_err_and(|x| TryRecvError::Empty.eq(&x)),
-            true
-        );
+        assert!(rx_silent_user
+            .try_recv()
+            .is_err_and(|x| TryRecvError::Empty.eq(&x)));
 
         shutdown_token.cancel();
         voice_activity.await.unwrap();
@@ -437,12 +396,9 @@ mod tests {
         );
 
         assert_eq!(Err(TryRecvError::Empty), rx_silent_channel.try_recv());
-        assert_eq!(
-            rx_silent_user
-                .try_recv()
-                .is_err_and(|x| TryRecvError::Empty.eq(&x)),
-            true
-        );
+        assert!(rx_silent_user
+            .try_recv()
+            .is_err_and(|x| TryRecvError::Empty.eq(&x)));
 
         println!("sending shutdown token 2");
         shutdown_token.cancel();
