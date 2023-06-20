@@ -10,17 +10,23 @@ use whisper_rs::WhisperToken;
 use crate::model::types::{DiscordAudioSample, DiscordRtcTimestamp, Transcription, UserId};
 
 #[derive(Debug)]
-pub(crate) struct DiscordAudioData {
-    pub discord_audio: Vec<DiscordAudioSample>,
-    pub timestamp: DiscordRtcTimestamp,
-    pub user_id: UserId,
+pub(crate) enum UserAudioEventType {
+    Audio(DiscordAudioData),
+    Speaking,
+    Silent,
+    Idle,
 }
 
 #[derive(Debug)]
-pub struct VoiceActivityData {
-    /// Sent when a user begins speaking or stops speaking.
-    pub user_id: u64,
-    pub speaking: bool,
+pub(crate) struct UserAudioEvent {
+    pub user_id: UserId,
+    pub event_type: UserAudioEventType,
+}
+
+#[derive(Debug)]
+pub(crate) struct DiscordAudioData {
+    pub discord_audio: Vec<DiscordAudioSample>,
+    pub timestamp: DiscordRtcTimestamp,
 }
 
 #[derive(Debug)]

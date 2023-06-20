@@ -27,7 +27,7 @@ fn duration_to_rtc(duration: &Duration) -> DiscordRtcTimestamp {
     Wrapping(rtc_samples as DiscordRtcTimestampInner)
 }
 
-fn rtc_timestamp_to_index(ts1: DiscordRtcTimestamp, ts2: DiscordRtcTimestamp) -> usize {
+fn rtc_timestamp_to_index(ts1: &DiscordRtcTimestamp, ts2: &DiscordRtcTimestamp) -> usize {
     let delta = (ts2 - ts1).0 as usize;
     // we want the number of 16khz samples, so just multiply by 2.
     delta * WHISPER_SAMPLES_PER_MILLISECOND / RTC_CLOCK_SAMPLES_PER_MILLISECOND as usize
@@ -89,7 +89,7 @@ impl AudioBuffer {
     /// True if the given audio can entirely fit within this slice.
     pub fn can_fit_audio(
         &self,
-        rtc_timestamp: DiscordRtcTimestamp,
+        rtc_timestamp: &DiscordRtcTimestamp,
         discord_audio: &[DiscordAudioSample],
     ) -> bool {
         let rtc_length = duration_to_rtc(&samples_to_duration(discord_audio.len()));
@@ -116,7 +116,7 @@ impl AudioBuffer {
     /// If the slice is full, then the audio will be "silently" dropped.
     pub fn add_audio(
         &mut self,
-        rtc_timestamp: DiscordRtcTimestamp,
+        rtc_timestamp: &DiscordRtcTimestamp,
         discord_audio: &[DiscordAudioSample],
     ) {
         if !self.can_fit_audio(rtc_timestamp, discord_audio) {
@@ -125,12 +125,12 @@ impl AudioBuffer {
         }
 
         let start_index;
-        if let Some((start_rtc, _)) = self.start_time {
+        if let Some((start_rtc, _)) = self.start_time.as_ref() {
             start_index = rtc_timestamp_to_index(start_rtc, rtc_timestamp);
         } else {
             // this is the first audio for the slice, so we need to set
             // the start time
-            self.start_time = Some((rtc_timestamp, SystemTime::now()));
+            self.start_time = Some((rtc_timestamp.clone(), SystemTime::now()));
             start_index = 0;
         }
 
@@ -305,7 +305,7 @@ mod tests {
         assert_eq!(slice.buffer_duration(), Duration::from_millis(1000));
 
         slice.add_audio(
-            Wrapping(2000 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32),
+            &Wrapping(2000 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32),
             &vec![1; 500 * DISCORD_SAMPLES_PER_MILLISECOND * DISCORD_AUDIO_CHANNELS],
         );
 
@@ -315,7 +315,7 @@ mod tests {
         assert_eq!(time.0, 1000 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32);
 
         slice.add_audio(
-            Wrapping(4000 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32),
+            &Wrapping(4000 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32),
             &vec![1; 500 * DISCORD_SAMPLES_PER_MILLISECOND * DISCORD_AUDIO_CHANNELS],
         );
 
@@ -329,7 +329,7 @@ mod tests {
             - 1;
         // don't add audio that's too far in the future
         slice.add_audio(
-            Wrapping(max_acceptable_rtc),
+            &Wrapping(max_acceptable_rtc),
             &vec![1; 500 * DISCORD_SAMPLES_PER_MILLISECOND * DISCORD_AUDIO_CHANNELS],
         );
 
@@ -379,19 +379,19 @@ mod tests {
         // seconds [1,2) are silent
         assert_eq!(slice.buffer_duration(), Duration::ZERO);
 
-        slice.add_audio(start_rtc + ONE_SECOND_RTC, &SILENT_DISCORD_AUDIO);
+        slice.add_audio(&(start_rtc + ONE_SECOND_RTC), &SILENT_DISCORD_AUDIO);
         assert_eq!(slice.buffer_duration(), 2 * ONE_SECOND);
 
         // seconds [2,3) are noisy
         slice.add_audio(
-            start_rtc + ONE_SECOND_RTC + ONE_SECOND_RTC,
+            &(start_rtc + ONE_SECOND_RTC + ONE_SECOND_RTC),
             &NOISY_DISCORD_AUDIO,
         );
         assert_eq!(slice.buffer_duration(), 3 * ONE_SECOND);
 
         // seconds [3,4) are silent again
         slice.add_audio(
-            start_rtc + ONE_SECOND_RTC + ONE_SECOND_RTC + ONE_SECOND_RTC,
+            &(start_rtc + ONE_SECOND_RTC + ONE_SECOND_RTC + ONE_SECOND_RTC),
             &SILENT_DISCORD_AUDIO,
         );
         assert_eq!(slice.buffer_duration(), 4 * ONE_SECOND);

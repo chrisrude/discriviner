@@ -1,9 +1,8 @@
-use crate::audio::events::{DiscordAudioData, VoiceActivityData};
-use crate::audio::manager::AudioManager;
-
+use audio::events::UserAudioEvent;
 use audio::whisper::Whisper;
 use model::constants::USER_SILENCE_TIMEOUT;
 use model::types::VoiceChannelEvent;
+use scrivening::manager::AudioManager;
 use songbird::id::{ChannelId, GuildId, UserId};
 use songbird::ConnectionInfo;
 use songbird_client::packet_handler::PacketHandler;
@@ -14,7 +13,6 @@ use tokio_util::sync::CancellationToken;
 mod audio {
     pub(crate) mod audio_buffer;
     pub(crate) mod events;
-    pub(crate) mod manager;
     pub(crate) mod whisper;
 }
 pub mod model {
@@ -22,6 +20,7 @@ pub mod model {
     pub mod types;
 }
 mod scrivening {
+    pub(crate) mod manager;
     pub(crate) mod transcript_director;
 }
 mod songbird_client {
@@ -48,13 +47,13 @@ impl Discrivener {
 
         let shutdown_token = CancellationToken::new();
         let (tx_audio_data, rx_audio_data) =
-            tokio::sync::mpsc::unbounded_channel::<DiscordAudioData>();
+            tokio::sync::mpsc::unbounded_channel::<UserAudioEvent>();
         let (tx_api_events, rx_api_events) =
             tokio::sync::mpsc::unbounded_channel::<VoiceChannelEvent>();
         let (tx_silent_user_events, rx_silent_user_events) =
-            tokio::sync::mpsc::unbounded_channel::<(u64, bool)>();
+            tokio::sync::mpsc::unbounded_channel::<UserAudioEvent>();
         let (tx_voice_activity, rx_voice_activity) =
-            tokio::sync::mpsc::unbounded_channel::<VoiceActivityData>();
+            tokio::sync::mpsc::unbounded_channel::<UserAudioEvent>();
 
         let voice_activity_task = Some(VoiceActivity::monitor(
             rx_voice_activity,

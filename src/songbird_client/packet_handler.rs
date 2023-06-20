@@ -13,7 +13,8 @@ use std::sync::RwLock;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::audio::events::DiscordAudioData;
-use crate::audio::events::VoiceActivityData;
+use crate::audio::events::UserAudioEvent;
+use crate::audio::events::UserAudioEventType;
 use crate::model::types;
 use crate::model::types::ConnectData;
 use crate::model::types::DisconnectData;
@@ -24,16 +25,16 @@ use crate::model::types::VoiceChannelEvent;
 pub(crate) struct PacketHandler {
     ssrc_to_user_id: RwLock<std::collections::HashMap<types::Ssrc, types::UserId>>,
     tx_api_events: UnboundedSender<VoiceChannelEvent>,
-    tx_audio_data: UnboundedSender<DiscordAudioData>,
-    tx_voice_activity: UnboundedSender<VoiceActivityData>,
+    tx_audio_data: UnboundedSender<UserAudioEvent>,
+    tx_voice_activity: UnboundedSender<UserAudioEvent>,
 }
 
 impl PacketHandler {
     pub(crate) fn register(
         driver: &mut songbird::Driver,
         tx_api_events: UnboundedSender<VoiceChannelEvent>,
-        tx_audio_data: UnboundedSender<DiscordAudioData>,
-        tx_voice_activity: UnboundedSender<VoiceActivityData>,
+        tx_audio_data: UnboundedSender<UserAudioEvent>,
+        tx_voice_activity: UnboundedSender<UserAudioEvent>,
     ) {
         let handler = Self {
             ssrc_to_user_id: RwLock::new(std::collections::HashMap::new()),
@@ -58,9 +59,9 @@ impl PacketHandler {
         let user_id = self.user_id_from_ssrc(ssrc);
         if let Some(user_id) = user_id {
             self.tx_voice_activity
-                .send(VoiceActivityData {
+                .send(UserAudioEvent {
                     user_id,
-                    speaking: true,
+                    event_type: UserAudioEventType::Speaking,
                 })
                 .unwrap();
         }
@@ -74,10 +75,12 @@ impl PacketHandler {
     ) {
         if let Some(user_id) = self.user_id_from_ssrc(ssrc) {
             self.tx_audio_data
-                .send(DiscordAudioData {
+                .send(UserAudioEvent {
                     user_id,
-                    discord_audio: discord_audio.to_vec(),
-                    timestamp,
+                    event_type: UserAudioEventType::Audio(DiscordAudioData {
+                        discord_audio: discord_audio.to_vec(),
+                        timestamp,
+                    }),
                 })
                 .unwrap();
         }
@@ -88,9 +91,9 @@ impl PacketHandler {
     fn on_stop_talking(&self, ssrc: types::Ssrc) {
         if let Some(user_id) = self.user_id_from_ssrc(ssrc) {
             self.tx_voice_activity
-                .send(VoiceActivityData {
+                .send(UserAudioEvent {
                     user_id,
-                    speaking: false,
+                    event_type: UserAudioEventType::Silent,
                 })
                 .unwrap();
         }

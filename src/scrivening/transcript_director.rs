@@ -77,7 +77,7 @@ impl TranscriptDirector {
 
     pub fn add_audio(
         &mut self,
-        rtc_timestamp: DiscordRtcTimestamp,
+        rtc_timestamp: &DiscordRtcTimestamp,
         discord_audio: &[DiscordAudioSample],
     ) {
         // it seems like we get called with a single packet of silence right
@@ -96,7 +96,7 @@ impl TranscriptDirector {
         self.slice.add_audio(rtc_timestamp, discord_audio);
 
         if self.tentative_transcript_opt.is_some() {
-            eprintln!("discarding tentative transcription");
+            // eprintln!("discarding tentative transcription");
             self.tentative_transcript_opt = None;
         }
     }
@@ -129,7 +129,7 @@ impl TranscriptDirector {
                 self.last_silent_time = Instant::now();
                 return true;
             } else {
-                eprintln!("{}: user is silent, but not requesting transcription due to hysteresis prevention", self.slice_id);
+                // eprintln!("{}: user is silent, but not requesting transcription due to hysteresis prevention", self.slice_id);
             }
         }
 
@@ -169,7 +169,7 @@ impl TranscriptDirector {
                 if last_request.start_time == new_request.start_time
                     && last_request.original_duration == new_request.original_duration
                 {
-                    eprintln!("{}: discarding duplicate request", self.slice_id);
+                    // eprintln!("{}: discarding duplicate request", self.slice_id);
                     // if this is our final request, make sure the last request
                     // has the final flag set
                     if new_request.final_request {
@@ -244,7 +244,7 @@ impl TranscriptDirector {
         let time_since_transcript_end =
             SystemTime::now().duration_since(end_of_transcript).unwrap();
         if time_since_transcript_end < USER_SILENCE_TIMEOUT {
-            eprintln!("{} too soon to fast-track", self.slice_id);
+            // eprintln!("{} too soon to fast-track", self.slice_id);
             return false;
         }
 
@@ -304,7 +304,7 @@ impl TranscriptDirector {
         // for now, just do this on a full-transcript basis, but it should
         // also be possible to do per-segment.
         if self.shortcut_tentative_transcripts(message) {
-            eprintln!("fast-tracking tentative transcripts");
+            // eprintln!("fast-tracking tentative transcripts");
             self.tentative_transcript_opt = None;
             self.discard_audio(&message.audio_duration);
             return Some(message.clone());
@@ -334,13 +334,13 @@ impl TranscriptDirector {
         );
         // todo: check to see if the tentative transcription is accurate
 
-        eprintln!(
-            "have transcription: {} final segments ({} ms), {} tentative segments ({} ms)",
-            user_idle_transcript.segments.len(),
-            user_idle_transcript.audio_duration.as_millis(),
-            tentative_transcript.segments.len(),
-            tentative_transcript.audio_duration.as_millis(),
-        );
+        // eprintln!(
+        //     "have transcription: {} final segments ({} ms), {} tentative segments ({} ms)",
+        //     user_idle_transcript.segments.len(),
+        //     user_idle_transcript.audio_duration.as_millis(),
+        //     tentative_transcript.segments.len(),
+        //     tentative_transcript.audio_duration.as_millis(),
+        // );
 
         // eprintln!("user_idle transcription: '{}'", user_idle_transcript.text(),);
         // eprintln!("tentative transcription: '{}'", tentative_transcript.text(),);

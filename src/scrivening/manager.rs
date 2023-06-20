@@ -12,7 +12,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    audio::events::{DiscordAudioData, TranscriptionResponse},
+    audio::events::{DiscordAudioData, TranscriptionResponse, UserAudioEvent, UserAudioEventType},
     model::{
         constants::DISCARD_USER_AUDIO_AFTER,
         types::{UserId, VoiceChannelEvent},
@@ -22,8 +22,9 @@ use crate::{
 
 use super::super::Whisper;
 
-/// Handles a set of audio buffers, one for each user who is
-/// talking in the conversation.
+/// Creates an audio buffer for each user who is talking in the conversation.
+/// Takes in events related to those users, and forwards them to the
+/// appropriate buffer.
 pub(crate) struct AudioManager {
     // these are the buffers which we've assigned to a user
     // in the conversation.  We'll keep them around until some
@@ -34,13 +35,13 @@ pub(crate) struct AudioManager {
 
     // we'll have a single task which monitors this queue for new
     // audio data and then pushes it into the appropriate buffer.
-    rx_audio_data: sync::mpsc::UnboundedReceiver<DiscordAudioData>,
+    rx_audio_data: sync::mpsc::UnboundedReceiver<UserAudioEvent>,
 
     // this queue is used to notify the audio buffer manager that
     // a user's speech has become idle -- aka, USER_SILENCE_TIMEOUT_MS
     // has passed since the last audio data.  We'll use this to know when
     // to trigger our final transcription.
-    rx_silent_user_events: sync::mpsc::UnboundedReceiver<(UserId, bool)>,
+    rx_silent_user_events: sync::mpsc::UnboundedReceiver<UserAudioEvent>,
 
     // this is used to signal the audio buffer manager to shut down.
     shutdown_token: CancellationToken,
@@ -48,8 +49,8 @@ pub(crate) struct AudioManager {
 
 impl<'a> AudioManager {
     pub fn monitor(
-        rx_audio_data: sync::mpsc::UnboundedReceiver<DiscordAudioData>,
-        rx_silent_user_events: sync::mpsc::UnboundedReceiver<(UserId, bool)>,
+        rx_audio_data: sync::mpsc::UnboundedReceiver<UserAudioEvent>,
+        rx_silent_user_events: sync::mpsc::UnboundedReceiver<UserAudioEvent>,
         shutdown_token: CancellationToken,
         tx_api: sync::mpsc::UnboundedSender<VoiceChannelEvent>,
         whisper: Whisper,
@@ -120,34 +121,52 @@ impl<'a> AudioManager {
                     // we've been asked to shut down
                     return;
                 }
-                Some(DiscordAudioData {user_id,timestamp, discord_audio,}) = self.rx_audio_data.recv() => {
+                Some(UserAudioEvent{ user_id, event_type }) = self.rx_audio_data.recv() => {
                     // there's new audio for this user
                     self.with_buffer_for_user(user_id, |buffer| {
-                        buffer.add_audio(timestamp, &discord_audio);
-                        Self::maybe_request_transcription(
-                            &whisper,
-                            &mut pending_transcription_requests,
-                            buffer,
-                        )
+                        match &event_type {
+                            UserAudioEventType::Audio(DiscordAudioData{
+                                timestamp,
+                                discord_audio,
+                            }) => {
+                                buffer.add_audio(timestamp, &discord_audio);
+                                Self::maybe_request_transcription(
+                                    &whisper,
+                                    &mut pending_transcription_requests,
+                                    buffer,
+                                )
+                            }
+                            _ => {
+                                panic!("unexpected event type: {:?}", event_type);
+                            }
+                        }
                     });
                 }
-                Some((user_id, idle)) = self.rx_silent_user_events.recv() => {
+                Some(user_audio_event) = self.rx_silent_user_events.recv() => {
+                    let UserAudioEvent { user_id, event_type } = user_audio_event;
+
                     // this user has stopped talking for long enough, see if
                     // we have any audio left to finalize
                     self.with_buffer_for_user(user_id, |buffer| {
-                        if idle {
-                            eprintln!("user {:?} has become idle", user_id);
-                            if let Some(transcript) = buffer.handle_user_idle() {
-                                eprintln!("sending final transcription to API: {:?}", transcript.text());
-                                tx_api
-                                .send(VoiceChannelEvent::Transcription(
-                                    transcript,
-                                ))
-                                .unwrap();
+                        match event_type {
+                            UserAudioEventType::Silent => {
+                                eprintln!("user {:?} is silent", user_id);
+                                buffer.set_silent();
+                            },
+                            UserAudioEventType::Idle => {
+                                eprintln!("user {:?} has become idle", user_id);
+                                if let Some(transcript) = buffer.handle_user_idle() {
+                                    eprintln!("sending final transcription to API: {:?}", transcript.text());
+                                    tx_api
+                                    .send(VoiceChannelEvent::Transcription(
+                                        transcript,
+                                    ))
+                                    .unwrap();
+                                }
+                            },
+                            _ => {
+                                panic!("unexpected event type: {:?}", event_type);
                             }
-                        } else {
-                            eprintln!("user {:?} is silent", user_id);
-                            buffer.set_silent();
                         }
                         Self::maybe_request_transcription(
                             &whisper,
