@@ -1,28 +1,33 @@
-use crate::events::audio::{DiscordAudioData, VoiceActivityData};
-use crate::model::audio_manager::AudioManager;
+use crate::audio::events::{DiscordAudioData, VoiceActivityData};
+use crate::audio::manager::AudioManager;
 
+use audio::whisper::Whisper;
 use model::constants::USER_SILENCE_TIMEOUT;
 use model::types::VoiceChannelEvent;
-use model::voice_activity::VoiceActivity;
 use songbird::id::{ChannelId, GuildId, UserId};
 use songbird::ConnectionInfo;
+use songbird_client::packet_handler::PacketHandler;
+use songbird_client::voice_activity::VoiceActivity;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use whisper::Whisper;
 
-mod events {
-    pub(crate) mod audio;
+mod audio {
+    pub(crate) mod audio_buffer;
+    pub(crate) mod events;
+    pub(crate) mod manager;
+    pub(crate) mod whisper;
 }
 pub mod model {
-    pub(crate) mod audio_manager;
-    pub(crate) mod audio_slice;
     pub(crate) mod constants;
-    pub(crate) mod transcript_director;
     pub mod types;
+}
+mod scrivening {
+    pub(crate) mod transcript_director;
+}
+mod songbird_client {
+    pub(crate) mod packet_handler;
     pub(crate) mod voice_activity;
 }
-mod packet_handler;
-mod whisper;
 
 pub struct Discrivener {
     // task which will fire API change events
@@ -71,12 +76,7 @@ impl Discrivener {
         ));
 
         let mut driver = songbird::Driver::new(config);
-        packet_handler::PacketHandler::register(
-            &mut driver,
-            tx_api_events,
-            tx_audio_data,
-            tx_voice_activity,
-        );
+        PacketHandler::register(&mut driver, tx_api_events, tx_audio_data, tx_voice_activity);
 
         let api_task = Some(tokio::spawn(Self::start_api_task(
             rx_api_events,

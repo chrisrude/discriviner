@@ -12,15 +12,15 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    events::audio::{DiscordAudioData, TranscriptionResponse},
-    model::constants::DISCARD_USER_AUDIO_AFTER,
+    audio::events::{DiscordAudioData, TranscriptionResponse},
+    model::{
+        constants::DISCARD_USER_AUDIO_AFTER,
+        types::{UserId, VoiceChannelEvent},
+    },
+    scrivening::transcript_director::TranscriptDirector,
 };
 
-use super::{
-    super::Whisper,
-    transcript_director::TranscriptDirector,
-    types::{self, VoiceChannelEvent},
-};
+use super::super::Whisper;
 
 /// Handles a set of audio buffers, one for each user who is
 /// talking in the conversation.
@@ -30,7 +30,7 @@ pub(crate) struct AudioManager {
     // period of time after the user has stopped talking.
     // The tuple stored is:
     //   (time of last activity, buffer)
-    user_audio_map: HashMap<types::UserId, (Instant, TranscriptDirector)>,
+    user_audio_map: HashMap<UserId, (Instant, TranscriptDirector)>,
 
     // we'll have a single task which monitors this queue for new
     // audio data and then pushes it into the appropriate buffer.
@@ -40,7 +40,7 @@ pub(crate) struct AudioManager {
     // a user's speech has become idle -- aka, USER_SILENCE_TIMEOUT_MS
     // has passed since the last audio data.  We'll use this to know when
     // to trigger our final transcription.
-    rx_silent_user_events: sync::mpsc::UnboundedReceiver<(types::UserId, bool)>,
+    rx_silent_user_events: sync::mpsc::UnboundedReceiver<(UserId, bool)>,
 
     // this is used to signal the audio buffer manager to shut down.
     shutdown_token: CancellationToken,
@@ -49,7 +49,7 @@ pub(crate) struct AudioManager {
 impl<'a> AudioManager {
     pub fn monitor(
         rx_audio_data: sync::mpsc::UnboundedReceiver<DiscordAudioData>,
-        rx_silent_user_events: sync::mpsc::UnboundedReceiver<(types::UserId, bool)>,
+        rx_silent_user_events: sync::mpsc::UnboundedReceiver<(UserId, bool)>,
         shutdown_token: CancellationToken,
         tx_api: sync::mpsc::UnboundedSender<VoiceChannelEvent>,
         whisper: Whisper,
@@ -70,7 +70,7 @@ impl<'a> AudioManager {
     /// mutable reference to that buffer.
     fn with_buffer_for_user(
         &mut self,
-        user_id: types::UserId,
+        user_id: UserId,
         mut yield_fn: impl FnMut(&mut TranscriptDirector),
     ) {
         // insert a new buffer if we don't have one for this user

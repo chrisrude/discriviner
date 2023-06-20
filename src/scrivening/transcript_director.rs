@@ -5,17 +5,19 @@ use std::{
 
 use whisper_rs::WhisperToken;
 
-use crate::{events::audio::TranscriptionRequest, model::constants::MAX_LAG};
+use crate::{
+    audio::{audio_buffer::AudioSlice, events::TranscriptionRequest},
+    model::{
+        constants::{
+            AUTO_TRANSCRIPTION_PERIOD_MS, MAX_LAG, SILENT_TIMEOUT, TOKENS_TO_KEEP,
+            USER_SILENCE_TIMEOUT,
+        },
+        types::{DiscordAudioSample, DiscordRtcTimestamp, Transcription},
+    },
+};
 
 /// Determines when transcriptions should be attempted,
 /// and sends the results to the API.
-use super::{
-    audio_slice::AudioSlice,
-    constants::{
-        AUTO_TRANSCRIPTION_PERIOD_MS, SILENT_TIMEOUT, TOKENS_TO_KEEP, USER_SILENCE_TIMEOUT,
-    },
-    types::{DiscordAudioSample, DiscordRtcTimestamp, Transcription},
-};
 
 pub(crate) struct LastRequestInfo {
     pub start_time: SystemTime,

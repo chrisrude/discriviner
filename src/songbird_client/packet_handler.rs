@@ -12,8 +12,8 @@ use songbird::EventContext;
 use std::sync::RwLock;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::events::audio::DiscordAudioData;
-use crate::events::audio::VoiceActivityData;
+use crate::audio::events::DiscordAudioData;
+use crate::audio::events::VoiceActivityData;
 use crate::model::types;
 use crate::model::types::ConnectData;
 use crate::model::types::DisconnectData;

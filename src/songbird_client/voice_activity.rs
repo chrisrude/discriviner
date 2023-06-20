@@ -1,5 +1,6 @@
-use crate::events::audio::VoiceActivityData;
+use crate::audio::events::VoiceActivityData;
 use crate::model::types::UserId;
+use crate::model::types::VoiceChannelEvent;
 use std::collections;
 use std::collections::VecDeque;
 use tokio::sync;
@@ -8,8 +9,6 @@ use tokio::time;
 use tokio::time::Duration;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
-
-use super::types::VoiceChannelEvent;
 
 pub(crate) struct VoiceActivity {
     last_time_by_user: collections::HashMap<UserId, (bool, time::Instant)>,
@@ -105,7 +104,6 @@ impl VoiceActivity {
 
                     // forward on silent user events.  These will be used
                     // to eagerly kick off transcriptions.
-                    // todo: use the general event channel instead?
                     if !activity.speaking {
                         self.tx_silent_user_events.send((activity.user_id, false)).unwrap();
                     }

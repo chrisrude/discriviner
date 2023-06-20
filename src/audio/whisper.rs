@@ -3,9 +3,10 @@ use std::{path::Path, sync::Arc};
 use bytes::Bytes;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperToken};
 
-use crate::events::audio::{TranscriptionRequest, TranscriptionResponse};
-
-use super::model::types::{TextSegment, TokenWithProbability, Transcription, WhisperAudioSample};
+use crate::{
+    audio::events::{TranscriptionRequest, TranscriptionResponse},
+    model::types::{TextSegment, TokenWithProbability, Transcription, WhisperAudioSample},
+};
 
 pub(crate) struct Whisper {
     whisper_context: Arc<WhisperContext>,

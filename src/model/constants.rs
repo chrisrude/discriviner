@@ -28,3 +28,18 @@ pub(crate) const WHISPER_SAMPLES_PER_MILLISECOND: usize = 16;
 
 // todo: what's a good value here?
 pub(crate) const MAX_LAG: Duration = Duration::from_secs(3);
+
+pub(crate) const DISCORD_AUDIO_CHANNELS: usize = 2;
+pub(crate) const DISCORD_SAMPLES_PER_SECOND: usize = 48000;
+
+// The RTC timestamp uses an 48khz clock.
+pub(crate) const RTC_CLOCK_SAMPLES_PER_MILLISECOND: u128 = 48;
+
+// being a whole number. If this is not the case, we'll need to
+// do some more complicated resampling.
+pub(crate) const BITRATE_CONVERSION_RATIO: usize =
+    DISCORD_SAMPLES_PER_SECOND / WHISPER_SAMPLES_PER_SECOND;
+
+// the total size of the buffer we'll use to store audio, in samples
+pub(crate) const WHISPER_AUDIO_BUFFER_SIZE: usize =
+    WHISPER_SAMPLES_PER_SECOND * AUDIO_TO_RECORD_SECONDS;

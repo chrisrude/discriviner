@@ -6,27 +6,16 @@ use std::{
 
 use bytes::Bytes;
 
-use crate::model::constants::WHISPER_SAMPLES_PER_MILLISECOND;
-
-use super::{
-    constants::{AUDIO_TO_RECORD, AUDIO_TO_RECORD_SECONDS, WHISPER_SAMPLES_PER_SECOND},
+use crate::model::{
+    constants::{
+        AUDIO_TO_RECORD, BITRATE_CONVERSION_RATIO, DISCORD_AUDIO_CHANNELS,
+        RTC_CLOCK_SAMPLES_PER_MILLISECOND, WHISPER_AUDIO_BUFFER_SIZE,
+        WHISPER_SAMPLES_PER_MILLISECOND,
+    },
     types::{
-        self, DiscordAudioSample, DiscordRtcTimestamp, DiscordRtcTimestampInner, WhisperAudioSample,
+        DiscordAudioSample, DiscordRtcTimestamp, DiscordRtcTimestampInner, WhisperAudioSample,
     },
 };
-
-const DISCORD_AUDIO_CHANNELS: usize = 2;
-const DISCORD_SAMPLES_PER_SECOND: usize = 48000;
-
-// The RTC timestamp uses an 48khz clock.
-const RTC_CLOCK_SAMPLES_PER_MILLISECOND: u128 = 48;
-
-// being a whole number. If this is not the case, we'll need to
-// do some more complicated resampling.
-const BITRATE_CONVERSION_RATIO: usize = DISCORD_SAMPLES_PER_SECOND / WHISPER_SAMPLES_PER_SECOND;
-
-// the total size of the buffer we'll use to store audio, in samples
-const WHISPER_AUDIO_BUFFER_SIZE: usize = WHISPER_SAMPLES_PER_SECOND * AUDIO_TO_RECORD_SECONDS;
 
 const DISCORD_AUDIO_MAX_VALUE: WhisperAudioSample = DiscordAudioSample::MAX as WhisperAudioSample;
 
@@ -180,12 +169,15 @@ impl AudioSlice {
             dest_buf[i] = samples
                 .iter()
                 .take(DISCORD_AUDIO_CHANNELS)
-                .map(|x| *x as types::WhisperAudioSample)
-                .sum::<types::WhisperAudioSample>()
+                .map(|x| *x as WhisperAudioSample)
+                .sum::<WhisperAudioSample>()
                 / DISCORD_AUDIO_MAX_VALUE_TWO_SAMPLES;
         }
     }
 
+    /// Returns the current audio buffer as a Bytes reference.
+    /// This does not copy the audio data, so it is only valid
+    /// for the lifetime of the audio slice.
     pub fn get_bytes(&self) -> Bytes {
         let buffer = self.audio.as_slice();
         let buffer_len_bytes = std::mem::size_of_val(buffer);
@@ -273,6 +265,8 @@ impl AudioSlice {
 
 #[cfg(test)]
 mod tests {
+    use crate::model::constants::{AUDIO_TO_RECORD_SECONDS, DISCORD_SAMPLES_PER_SECOND};
+
     use super::*;
     use std::time::Duration;
 
