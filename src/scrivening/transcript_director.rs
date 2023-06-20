@@ -75,6 +75,10 @@ impl TranscriptDirector {
         self.user_silent = true;
     }
 
+    pub fn set_speaking(&mut self) {
+        self.user_silent = false;
+    }
+
     pub fn add_audio(
         &mut self,
         rtc_timestamp: &DiscordRtcTimestamp,

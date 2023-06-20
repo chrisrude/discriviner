@@ -2,7 +2,7 @@ use audio::events::UserAudioEvent;
 use audio::whisper::Whisper;
 use model::constants::USER_SILENCE_TIMEOUT;
 use model::types::VoiceChannelEvent;
-use scrivening::manager::AudioManager;
+use scrivening::manager::UserAudioEventDemux;
 use songbird::id::{ChannelId, GuildId, UserId};
 use songbird::ConnectionInfo;
 use songbird_client::packet_handler::PacketHandler;
@@ -66,7 +66,7 @@ impl Discrivener {
         let whisper = Whisper::load(model_path);
 
         // the audio buffer manager gets the voice data
-        let audio_buffer_manager_task = Some(AudioManager::monitor(
+        let audio_buffer_manager_task = Some(UserAudioEventDemux::monitor(
             rx_audio_data,
             rx_silent_user_events,
             shutdown_token.clone(),

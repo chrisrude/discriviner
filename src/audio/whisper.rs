@@ -1,6 +1,7 @@
 use std::{path::Path, sync::Arc};
 
 use bytes::Bytes;
+use tokio::task::JoinHandle;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperToken};
 
 use crate::{
@@ -29,7 +30,7 @@ impl Whisper {
         Self { whisper_context }
     }
 
-    pub(crate) async fn process_transcription_request(
+    pub(crate) fn process_transcription_request(
         &self,
         TranscriptionRequest {
             audio_bytes,
@@ -38,24 +39,21 @@ impl Whisper {
             start_timestamp,
             user_id,
         }: TranscriptionRequest,
-    ) -> TranscriptionResponse {
+    ) -> JoinHandle<TranscriptionResponse> {
         let processing_start = std::time::Instant::now();
         let whisper_context_clone = self.whisper_context.clone();
-        let conversion_task = tokio::task::spawn_blocking(move || {
-            Self::audio_to_text(&whisper_context_clone, audio_bytes, previous_tokens)
-        });
-
-        let segments = conversion_task.await.unwrap();
-
-        let transcript = Transcription {
-            start_timestamp,
-            user_id,
-            segments,
-            audio_duration,
-            processing_time: processing_start.elapsed(),
-        };
-
-        TranscriptionResponse { transcript }
+        tokio::task::spawn_blocking(move || {
+            let segments =
+                Self::audio_to_text(&whisper_context_clone, audio_bytes, previous_tokens);
+            let transcript = Transcription {
+                start_timestamp,
+                user_id,
+                segments,
+                audio_duration,
+                processing_time: processing_start.elapsed(),
+            };
+            TranscriptionResponse { transcript }
+        })
     }
 
     /// This will take a long time to run, don't call it
