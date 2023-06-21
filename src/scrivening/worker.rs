@@ -102,10 +102,14 @@ impl UserAudioWorker {
                     if let Some(transcription_request) = self.audio_buffer.make_transcription_request(
                         self.last_tokens.get(),
                     ) {
-                        pending_transcription_requests.push(
-                            self.whisper
-                            .process_transcription_request(transcription_request)
-                        );
+                        if pending_transcription_requests.is_empty() {
+                            pending_transcription_requests.push(
+                                self.whisper
+                                .process_transcription_request(transcription_request)
+                            );
+                        } else {
+                            eprintln!("WARNING: we have a pending transcription request.  Ignoring second one.");
+                        }
                     }
                     next_transcription_time.as_mut().reset(never);
                     None
