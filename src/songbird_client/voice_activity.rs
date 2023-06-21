@@ -46,7 +46,7 @@ impl SpeakingUsers {
     }
 }
 
-#[derive(Eq, Ord, PartialEq)]
+#[derive(Eq, PartialEq)]
 struct UserTime {
     user_id: UserId,
     idle_timeout: time::Instant,
@@ -55,6 +55,12 @@ struct UserTime {
 impl PartialOrd for UserTime {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         self.idle_timeout.partial_cmp(&other.idle_timeout)
+    }
+}
+
+impl Ord for UserTime {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.idle_timeout.cmp(&other.idle_timeout)
     }
 }
 
