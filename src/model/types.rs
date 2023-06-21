@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
 use songbird::events::context_data;
+use whisper_rs::WhisperToken;
 
 pub(crate) type DiscordAudioSample = i16;
 pub(crate) type DiscordRtcTimestampInner = u32;
@@ -342,6 +343,13 @@ impl Transcription {
         text.push_str(self.segments.len().to_string().as_str());
         text.push_str(" segments)");
         text
+    }
+
+    pub(crate) fn token_ids(&self) -> Vec<WhisperToken> {
+        self.segments
+            .iter()
+            .flat_map(|s: &TextSegment| s.tokens_with_probability.iter().map(|t| t.token_id))
+            .collect()
     }
 }
 

@@ -5,20 +5,22 @@ use std::{
 };
 
 use tokio::{
-    sync,
-    task::{self},
+    sync::{self, mpsc::UnboundedSender},
+    task,
 };
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    audio::events::{UserAudioEvent, UserAudioEventType},
+    audio::events::{DiscordAudioData, UserAudioEvent, UserAudioEventType},
     model::{
         constants::DISCARD_USER_AUDIO_AFTER,
         types::{UserId, VoiceChannelEvent},
     },
 };
 
-use super::{super::Whisper, worker::UserAudioWorker};
+use super::{
+    super::Whisper, transcript_strategy::DefaultTranscriptStrategy, worker::UserAudioWorker,
+};
 
 /// Creates an audio buffer for each user who is talking in the conversation.
 /// Takes in events related to those users, and forwards them to the
@@ -29,7 +31,14 @@ pub(crate) struct UserAudioManager {
     // period of time after the user has stopped talking.
     // The tuple stored is:
     //   (time of last activity, buffer)
-    user_audio_map: HashMap<UserId, (sync::mpsc::UnboundedSender<UserAudioEventType>, Instant)>,
+    user_audio_map: HashMap<
+        UserId,
+        (
+            UnboundedSender<UserAudioEventType>,
+            UnboundedSender<DiscordAudioData>,
+            Instant,
+        ),
+    >,
 
     tx_api: sync::mpsc::UnboundedSender<VoiceChannelEvent>,
 
@@ -41,7 +50,7 @@ pub(crate) struct UserAudioManager {
 
 impl UserAudioManager {
     pub fn monitor(
-        rx_audio_data: sync::mpsc::UnboundedReceiver<UserAudioEvent>,
+        rx_audio_data: sync::mpsc::UnboundedReceiver<DiscordAudioData>,
         rx_silent_user_events: sync::mpsc::UnboundedReceiver<UserAudioEvent>,
         shutdown_token: CancellationToken,
         tx_api: sync::mpsc::UnboundedSender<VoiceChannelEvent>,
@@ -60,24 +69,42 @@ impl UserAudioManager {
         })
     }
 
+    fn get_worker(
+        &mut self,
+        user_id: UserId,
+    ) -> &mut (
+        UnboundedSender<UserAudioEventType>,
+        UnboundedSender<DiscordAudioData>,
+        Instant,
+    ) {
+        // insert a new buffer if we don't have one for this user
+        match self.user_audio_map.entry(user_id) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                let (tx_worker, tx_audio) = UserAudioWorker::monitor(
+                    self.shutdown_token.clone(),
+                    DefaultTranscriptStrategy::new(),
+                    self.tx_api.clone(),
+                    user_id,
+                    self.whisper.clone(),
+                );
+                entry.insert((tx_worker, tx_audio, Instant::now()))
+            }
+        }
+    }
+
     /// Helper function, which will lookup or allocate a buffer for
     /// the given user, and then call the given function with a
     /// mutable reference to that buffer.
     fn send_to_worker(&mut self, event: UserAudioEvent) {
-        // insert a new buffer if we don't have one for this user
-        let (tx_worker, last_activity) = match self.user_audio_map.entry(event.user_id) {
-            Entry::Occupied(entry) => entry.into_mut(),
-            Entry::Vacant(entry) => {
-                let tx_worker = UserAudioWorker::monitor(
-                    self.shutdown_token.clone(),
-                    self.tx_api.clone(),
-                    event.user_id,
-                    self.whisper.clone(),
-                );
-                entry.insert((tx_worker, Instant::now()))
-            }
-        };
+        let (tx_worker, _, last_activity) = self.get_worker(event.user_id);
         tx_worker.send(event.event_type).unwrap();
+        *last_activity = Instant::now();
+    }
+
+    fn send_audio_to_worker(&mut self, audio: DiscordAudioData) {
+        let (_, tx_audio, last_activity) = self.get_worker(audio.user_id);
+        tx_audio.send(audio).unwrap();
         *last_activity = Instant::now();
     }
 
@@ -85,7 +112,7 @@ impl UserAudioManager {
     /// data and transcription requests.
     async fn loop_forever(
         &mut self,
-        mut rx_audio_data: sync::mpsc::UnboundedReceiver<UserAudioEvent>,
+        mut rx_audio_data: sync::mpsc::UnboundedReceiver<DiscordAudioData>,
         mut rx_silent_user_events: sync::mpsc::UnboundedReceiver<UserAudioEvent>,
     ) {
         loop {
@@ -95,7 +122,7 @@ impl UserAudioManager {
                     return;
                 }
                 Some( user_audio_event ) = rx_audio_data.recv() => {
-                    self.send_to_worker(user_audio_event);
+                    self.send_audio_to_worker(user_audio_event);
                 }
                 Some( user_audio_event ) = rx_silent_user_events.recv() => {
                     // there's new audio for this user
@@ -106,7 +133,7 @@ impl UserAudioManager {
             // look through every buffer, and discard any which haven't been
             // updated in the past DISCARD_USER_AUDIO_AFTER period
             let now = Instant::now();
-            self.user_audio_map.retain(|_, (_, last_activity)| {
+            self.user_audio_map.retain(|_, (_, _, last_activity)| {
                 now.duration_since(*last_activity) < DISCARD_USER_AUDIO_AFTER
             });
         }

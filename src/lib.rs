@@ -1,4 +1,4 @@
-use audio::events::UserAudioEvent;
+use audio::events::{DiscordAudioData, UserAudioEvent};
 use audio::whisper::Whisper;
 use model::constants::USER_SILENCE_TIMEOUT;
 use model::types::VoiceChannelEvent;
@@ -21,7 +21,7 @@ pub mod model {
 }
 mod scrivening {
     pub(crate) mod manager;
-    pub(crate) mod transcript_director;
+    pub(crate) mod transcript_strategy;
     pub(crate) mod worker;
 }
 mod songbird_client {
@@ -48,7 +48,7 @@ impl Discrivener {
 
         let shutdown_token = CancellationToken::new();
         let (tx_audio_data, rx_audio_data) =
-            tokio::sync::mpsc::unbounded_channel::<UserAudioEvent>();
+            tokio::sync::mpsc::unbounded_channel::<DiscordAudioData>();
         let (tx_api_events, rx_api_events) =
             tokio::sync::mpsc::unbounded_channel::<VoiceChannelEvent>();
         let (tx_silent_user_events, rx_silent_user_events) =

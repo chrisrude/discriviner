@@ -9,15 +9,14 @@ use whisper_rs::WhisperToken;
 
 use crate::model::types::{DiscordAudioSample, DiscordRtcTimestamp, Transcription, UserId};
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub(crate) enum UserAudioEventType {
-    Audio(DiscordAudioData),
     Speaking,
     Silent,
     Idle,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub(crate) struct UserAudioEvent {
     pub user_id: UserId,
     pub event_type: UserAudioEventType,
@@ -25,8 +24,9 @@ pub(crate) struct UserAudioEvent {
 
 #[derive(Debug)]
 pub(crate) struct DiscordAudioData {
+    pub user_id: UserId,
     pub discord_audio: Vec<DiscordAudioSample>,
-    pub timestamp: DiscordRtcTimestamp,
+    pub rtc_timestamp: DiscordRtcTimestamp,
 }
 
 #[derive(Debug)]
@@ -38,7 +38,7 @@ pub(crate) struct TranscriptionRequest {
     pub user_id: UserId,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub(crate) struct TranscriptionResponse {
     pub transcript: Transcription,
 }

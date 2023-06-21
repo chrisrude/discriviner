@@ -25,7 +25,7 @@ use crate::model::types::VoiceChannelEvent;
 pub(crate) struct PacketHandler {
     ssrc_to_user_id: RwLock<std::collections::HashMap<types::Ssrc, types::UserId>>,
     tx_api_events: UnboundedSender<VoiceChannelEvent>,
-    tx_audio_data: UnboundedSender<UserAudioEvent>,
+    tx_audio_data: UnboundedSender<DiscordAudioData>,
     tx_voice_activity: UnboundedSender<UserAudioEvent>,
 }
 
@@ -33,7 +33,7 @@ impl PacketHandler {
     pub(crate) fn register(
         driver: &mut songbird::Driver,
         tx_api_events: UnboundedSender<VoiceChannelEvent>,
-        tx_audio_data: UnboundedSender<UserAudioEvent>,
+        tx_audio_data: UnboundedSender<DiscordAudioData>,
         tx_voice_activity: UnboundedSender<UserAudioEvent>,
     ) {
         let handler = Self {
@@ -70,17 +70,15 @@ impl PacketHandler {
     fn on_audio(
         &self,
         discord_audio: &[DiscordAudioSample],
-        timestamp: DiscordRtcTimestamp,
+        rtc_timestamp: DiscordRtcTimestamp,
         ssrc: types::Ssrc,
     ) {
         if let Some(user_id) = self.user_id_from_ssrc(ssrc) {
             self.tx_audio_data
-                .send(UserAudioEvent {
+                .send(DiscordAudioData {
                     user_id,
-                    event_type: UserAudioEventType::Audio(DiscordAudioData {
-                        discord_audio: discord_audio.to_vec(),
-                        timestamp,
-                    }),
+                    discord_audio: discord_audio.to_vec(),
+                    rtc_timestamp,
                 })
                 .unwrap();
         }

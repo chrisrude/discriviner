@@ -5,6 +5,7 @@ use std::{
 };
 
 use bytes::Bytes;
+use whisper_rs::WhisperToken;
 
 use crate::model::{
     constants::{
@@ -16,6 +17,8 @@ use crate::model::{
         DiscordAudioSample, DiscordRtcTimestamp, DiscordRtcTimestampInner, WhisperAudioSample,
     },
 };
+
+use super::events::TranscriptionRequest;
 
 const DISCORD_AUDIO_MAX_VALUE: WhisperAudioSample = DiscordAudioSample::MAX as WhisperAudioSample;
 
@@ -86,6 +89,23 @@ impl AudioBuffer {
         }
     }
 
+    pub fn make_transcription_request(
+        &self,
+        previous_tokens: Vec<WhisperToken>,
+    ) -> Option<TranscriptionRequest> {
+        if let Some(start_time) = self.start_time {
+            Some(TranscriptionRequest {
+                audio_bytes: self.get_bytes(),
+                audio_duration: self.buffer_duration(),
+                previous_tokens,
+                start_timestamp: start_time.1,
+                user_id: self.slice_id,
+            })
+        } else {
+            None
+        }
+    }
+
     /// True if the given audio can entirely fit within this slice.
     pub fn can_fit_audio(
         &self,
@@ -104,11 +124,6 @@ impl AudioBuffer {
             return false;
         }
         true
-    }
-
-    /// True if the slice has no audio in it.
-    pub fn is_empty(&self) -> bool {
-        self.start_time.is_none() && self.audio.is_empty()
     }
 
     /// Adds the given audio to the slice, resampling it from the
