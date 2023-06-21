@@ -16,11 +16,10 @@ use crate::{
         constants::DISCARD_USER_AUDIO_AFTER,
         types::{UserId, VoiceChannelEvent},
     },
+    strategies::default_strategy::DefaultTranscriptStrategy,
 };
 
-use super::{
-    super::Whisper, transcript_strategy::DefaultTranscriptStrategy, worker::UserAudioWorker,
-};
+use super::{super::Whisper, worker::UserAudioWorker};
 
 /// Creates an audio buffer for each user who is talking in the conversation.
 /// Takes in events related to those users, and forwards them to the

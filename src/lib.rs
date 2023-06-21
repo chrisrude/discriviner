@@ -28,6 +28,11 @@ mod songbird_client {
     pub(crate) mod packet_handler;
     pub(crate) mod voice_activity;
 }
+mod strategies {
+    pub(crate) mod default_strategy;
+    pub(crate) mod five_second_strategy;
+    pub(crate) mod strategy_trait;
+}
 
 pub struct Discrivener {
     // task which will fire API change events

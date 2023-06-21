@@ -21,13 +21,10 @@ use crate::{
         constants::{TOKENS_TO_KEEP, USER_SILENCE_TIMEOUT},
         types::{Transcription, UserId, VoiceChannelEvent},
     },
-    scrivening::transcript_strategy::WorkerActions,
+    strategies::strategy_trait::{TranscriptStrategy, WorkerActions, WorkerContext},
 };
 
-use super::{
-    super::Whisper,
-    transcript_strategy::{TranscriptStrategy, WorkerContext},
-};
+use super::super::Whisper;
 
 pub(crate) struct UserAudioWorker {
     audio_buffer: AudioBuffer,
@@ -88,7 +85,6 @@ impl UserAudioWorker {
         let mut pending_transcription_requests =
             FuturesUnordered::<JoinHandle<TranscriptionResponse>>::new();
 
-        // 31.68 years is close enough to never... said the child
         let never = Instant::now() + time::Duration::from_secs(1000 * 1000 * 1000);
 
         // start without a transcription time, let the transcript strategy decide when to start

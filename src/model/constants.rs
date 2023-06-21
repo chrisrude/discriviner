@@ -43,3 +43,6 @@ pub(crate) const BITRATE_CONVERSION_RATIO: usize =
 // the total size of the buffer we'll use to store audio, in samples
 pub(crate) const WHISPER_AUDIO_BUFFER_SIZE: usize =
     WHISPER_SAMPLES_PER_SECOND * AUDIO_TO_RECORD_SECONDS;
+
+// 31.68 years is BASICALLY forever, said my niece
+pub(crate) const FOREVER: Duration = Duration::from_secs(1000 * 1000 * 1000);

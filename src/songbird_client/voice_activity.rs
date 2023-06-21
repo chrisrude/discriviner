@@ -1,5 +1,6 @@
 use crate::audio::events::UserAudioEvent;
 use crate::audio::events::UserAudioEventType;
+use crate::model::constants::FOREVER;
 use crate::model::types::UserId;
 use crate::model::types::VoiceChannelEvent;
 use std::collections;
@@ -11,13 +12,46 @@ use tokio::time::Duration;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
+struct SpeakingUsers {
+    speaking_users: collections::HashSet<UserId>,
+    tx_api_events: sync::mpsc::UnboundedSender<VoiceChannelEvent>,
+}
+
+impl SpeakingUsers {
+    pub fn new(tx_api_events: sync::mpsc::UnboundedSender<VoiceChannelEvent>) -> Self {
+        Self {
+            speaking_users: collections::HashSet::new(),
+            tx_api_events,
+        }
+    }
+
+    pub fn add(&mut self, user_id: UserId) {
+        self.speaking_users.insert(user_id);
+        if self.speaking_users.len() == 1 {
+            self.announce(false);
+        }
+    }
+
+    pub fn remove(&mut self, user_id: &UserId) {
+        self.speaking_users.remove(user_id);
+        if self.speaking_users.is_empty() {
+            self.announce(true);
+        }
+    }
+
+    fn announce(&mut self, is_silent: bool) {
+        self.tx_api_events
+            .send(VoiceChannelEvent::ChannelSilent(is_silent))
+            .ok();
+    }
+}
+
 pub(crate) struct VoiceActivity {
     last_time_by_user: collections::HashMap<UserId, (bool, time::Instant)>,
     rx_voice_activity: sync::mpsc::UnboundedReceiver<UserAudioEvent>,
     shutdown_token: CancellationToken,
     silence_list: VecDeque<(Instant, UserId, Instant)>,
-    speaking_users: collections::HashSet<UserId>,
-    tx_api_events: sync::mpsc::UnboundedSender<VoiceChannelEvent>,
+    speaking_users: SpeakingUsers,
     tx_silent_user_events: sync::mpsc::UnboundedSender<UserAudioEvent>,
     user_silence_timeout: Duration,
 }
@@ -31,8 +65,6 @@ pub(crate) struct VoiceActivity {
 ///    - anyone then starts talking
 ///  - after a user has been silent for N seconds
 impl VoiceActivity {
-    const ONE_YEAR: Duration = Duration::from_secs(60 * 60 * 24 * 365);
-
     pub(crate) fn monitor(
         rx_voice_activity: sync::mpsc::UnboundedReceiver<UserAudioEvent>,
         shutdown_token: CancellationToken,
@@ -45,8 +77,7 @@ impl VoiceActivity {
             rx_voice_activity,
             shutdown_token,
             silence_list: VecDeque::new(),
-            speaking_users: collections::HashSet::new(),
-            tx_api_events,
+            speaking_users: SpeakingUsers::new(tx_api_events.clone()),
             tx_silent_user_events,
             user_silence_timeout,
         };
@@ -57,7 +88,7 @@ impl VoiceActivity {
 
     async fn loop_forever(&mut self) {
         loop {
-            let forever = time::Instant::now().checked_add(Self::ONE_YEAR).unwrap();
+            let forever = time::Instant::now().checked_add(FOREVER).unwrap();
             let noop_time = (forever, 0, forever);
 
             // next future will always be at the end... only need to wait for a single one ever
@@ -112,12 +143,8 @@ impl VoiceActivity {
     /// Handle a user speaking.  This will send a "non-silent channel"
     /// event if this is the first user speaking.
     fn handle_user_speaking(&mut self, user_id: &UserId) {
-        let added = self.speaking_users.insert(*user_id);
-        if added && self.speaking_users.len() == 1 {
-            self.tx_api_events
-                .send(VoiceChannelEvent::ChannelSilent(false))
-                .unwrap();
-        }
+        self.speaking_users.add(*user_id);
+
         // mark the time the user was last heard from.  This will
         // prevent the user idle event from being triggered.
         self.last_time_by_user
@@ -129,14 +156,9 @@ impl VoiceActivity {
     /// to fire an "idle user" event, should it remain silent for
     /// self.user_silence_timeout.
     fn handle_user_silent(&mut self, user_id: &UserId) {
-        let now = time::Instant::now();
-        let removed = self.speaking_users.remove(user_id);
-        if removed && self.speaking_users.is_empty() {
-            self.tx_api_events
-                .send(VoiceChannelEvent::ChannelSilent(true))
-                .unwrap();
-        }
+        self.speaking_users.remove(user_id);
 
+        let now = time::Instant::now();
         // store the last time we heard from this user.  If the user
         // has not spoken again at the end of this interval, then
         // we will send a silent user event
