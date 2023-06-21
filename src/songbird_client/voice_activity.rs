@@ -146,7 +146,7 @@ impl VoiceActivity {
         let mut voice_activity = Self {
             rx_voice_activity,
             shutdown_token,
-            speaking_users: SpeakingUsers::new(tx_api_events.clone()),
+            speaking_users: SpeakingUsers::new(tx_api_events),
             tx_silent_user_events,
             user_idle_detector: UserIdleDetector::new(
                 tx_silent_user_events_clone,
@@ -179,12 +179,12 @@ impl VoiceActivity {
                     let UserAudioEvent { user_id, event_type } = &event;
                     match event_type {
                         UserAudioEventType::Speaking => {
-                            self.speaking_users.add(&user_id);
-                            self.user_idle_detector.on_speaking(&user_id);
+                            self.speaking_users.add(user_id);
+                            self.user_idle_detector.on_speaking(user_id);
                         }
                         UserAudioEventType::Silent => {
-                            self.speaking_users.remove(&user_id);
-                            self.user_idle_detector.on_silent(&user_id);
+                            self.speaking_users.remove(user_id);
+                            self.user_idle_detector.on_silent(user_id);
                         }
                         _ => {}
                     };

@@ -93,17 +93,13 @@ impl AudioBuffer {
         &self,
         previous_tokens: Vec<WhisperToken>,
     ) -> Option<TranscriptionRequest> {
-        if let Some(start_time) = self.start_time {
-            Some(TranscriptionRequest {
+        self.start_time.map(|start_time| TranscriptionRequest {
                 audio_bytes: self.get_bytes(),
                 audio_duration: self.buffer_duration(),
                 previous_tokens,
                 start_timestamp: start_time.1,
                 user_id: self.slice_id,
             })
-        } else {
-            None
-        }
     }
 
     /// True if the given audio can entirely fit within this slice.

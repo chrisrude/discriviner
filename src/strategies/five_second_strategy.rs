@@ -70,7 +70,7 @@ impl TranscriptStrategy for FiveSecondStrategy {
             transcript.start_timestamp + transcript.audio_duration - USER_SILENCE_TIMEOUT;
 
         let (finalized_transcript, tentative_transcript) =
-            Transcription::split_at_end_time(&transcript, end_time);
+            Transcription::split_at_end_time(transcript, end_time);
 
         self.tentative_transcript_opt = if context.audio_duration
             == tentative_transcript.audio_duration
