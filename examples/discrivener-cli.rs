@@ -1,35 +1,39 @@
 use clap::Parser;
 use colored::Colorize;
-use discrivener::api;
-use discrivener::api_types;
+use discrivener::model::types::{Transcription, VoiceChannelEvent};
+use discrivener::Discrivener;
 use std::sync::Arc;
 use tokio::signal;
 
-fn on_text(message: api_types::TranscribedMessage, log_performance: bool) {
-    if message.text_segments.is_empty() {
+fn on_text(message: Transcription, log_performance: bool) {
+    if message.segments.is_empty() {
         println!();
         return;
     }
     if log_performance {
-        println!("Processing time: +{}ms", message.processing_time_ms);
-        println!("Audio duration: {}ms", message.audio_duration_ms);
+        println!(
+            "Processing time: +{}ms",
+            message.processing_time.as_millis()
+        );
+        println!("Audio duration: {}ms", message.audio_duration.as_millis());
         println!(
             "total time / Audio duration: {}",
-            message.processing_time_ms as f32 / message.audio_duration_ms as f32
+            message.processing_time.as_millis() as f32 / message.audio_duration.as_millis() as f32
         );
     }
 
     let mut first: bool = true;
-    for text_segment in message.text_segments {
+    for segment in message.segments {
+        // todo: color code based on probability
         if first {
             println!(
                 "{} says: {}",
                 message.user_id.to_string().bright_green(),
-                text_segment.text.bold(),
+                segment.text().bold(),
             );
             first = false;
         } else {
-            println!("\t\t\t {}", text_segment.text.bold());
+            println!("\t\t\t {}", segment.text().bold());
         }
     }
 }
@@ -37,13 +41,11 @@ fn on_text(message: api_types::TranscribedMessage, log_performance: bool) {
 #[tokio::main]
 async fn tokio_main(cli: Cli) {
     let log_performance = cli.log_performance;
-    let mut discrivener = api::Discrivener::load(
+    let mut discrivener = Discrivener::load(
         cli.model_path,
         Arc::new(move |event| match event {
-            api_types::VoiceChannelEvent::TranscribedMessage(message) => {
-                on_text(message, log_performance)
-            }
-            api_types::VoiceChannelEvent::Connect(status) => {
+            VoiceChannelEvent::Transcription(message) => on_text(message, log_performance),
+            VoiceChannelEvent::Connect(status) => {
                 println!(
                     "Connection status: {} to channel #{}",
                     "connected".bright_green(),
@@ -54,18 +56,13 @@ async fn tokio_main(cli: Cli) {
                     }
                 )
             }
-            api_types::VoiceChannelEvent::UserJoin(user_data) => {
-                println!(
-                    "User {} {}",
-                    user_data.user_id,
-                    if user_data.joined {
-                        "joined".bright_green()
-                    } else {
-                        "left".bright_purple()
-                    }
-                )
+            VoiceChannelEvent::UserJoin(user_id) => {
+                println!("User joined:  {}", user_id,)
             }
-            api_types::VoiceChannelEvent::Reconnect(status) => {
+            VoiceChannelEvent::UserLeave(user_id) => {
+                println!("User left:  {}", user_id,)
+            }
+            VoiceChannelEvent::Reconnect(status) => {
                 println!(
                     "Connection status: {} to channel #{}",
                     "reconnected".bright_green(),
@@ -76,13 +73,19 @@ async fn tokio_main(cli: Cli) {
                     }
                 )
             }
-            api_types::VoiceChannelEvent::Disconnect(_) => {
+            VoiceChannelEvent::Disconnect(_) => {
                 println!("Connection status: {}", "disconnected".bright_red());
             }
-            api_types::VoiceChannelEvent::VoiceActivity(_) => {}
+            VoiceChannelEvent::ChannelSilent(silent) => {
+                if silent {
+                    println!("Channel is silent");
+                } else {
+                    println!("Someone is talking");
+                }
+            }
         }),
-        cli.save_everything_to_file,
-    );
+    )
+    .await;
 
     let connection_result = discrivener
         .connect(
@@ -94,14 +97,14 @@ async fn tokio_main(cli: Cli) {
             cli.voice_token.as_str(),
         )
         .await;
-    if let Ok(_) = connection_result {
+    if connection_result.is_ok() {
         println!("Joined voice channel");
     } else {
         println!("Error joining voice channel");
     }
 
     signal::ctrl_c().await.unwrap();
-    discrivener.disconnect();
+    discrivener.disconnect().await;
 }
 
 /// Connect to a discord voice channel

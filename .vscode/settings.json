@@ -1,0 +1,22 @@
+{
+    "cSpell.words": [
+        "Demux",
+        "Demuxer",
+        "Deque",
+        "discrivener",
+        "DONT",
+        "downsampler",
+        "downsamples",
+        "guildless",
+        "oneshot",
+        "ringbuf",
+        "scrivening",
+        "ssid",
+        "Ssrc",
+        "unixsecs",
+        "unixtime"
+    ],
+    "rust-analyzer.linkedProjects": [
+        "./Cargo.toml"
+    ]
+}

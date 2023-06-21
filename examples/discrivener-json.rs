@@ -1,16 +1,20 @@
 use clap::Parser;
-use discrivener::api;
+use discrivener::Discrivener;
 
 use std::sync::Arc;
 use tokio::signal;
 
 #[tokio::main]
 async fn tokio_main(cli: Cli) {
-    let mut discrivener = api::Discrivener::load(
+    let mut discrivener = Discrivener::load(
         cli.model_path,
-        Arc::new(|event| println!("{}", serde_json::to_string(&event).unwrap())),
-        cli.save_everything_to_file,
-    );
+        Arc::new(|event| {
+            let json_string = serde_json::to_string(&event).unwrap();
+            // eprintln!("API Event: {:?}", json_string);
+            println!("{}", json_string);
+        }),
+    )
+    .await;
 
     let connection_result = discrivener
         .connect(
@@ -27,7 +31,8 @@ async fn tokio_main(cli: Cli) {
     }
 
     signal::ctrl_c().await.unwrap();
-    discrivener.disconnect();
+    eprintln!("Disconnecting...");
+    discrivener.disconnect().await;
 }
 
 /// Connect to a discord voice channel

@@ -13,43 +13,38 @@ crate-type = ["lib"]
 
 # helper for async framework
 [dependencies.async-trait]
-version = "0.1.51"
+version = "0.1.68"
 
-# ring buffer, used to store audio data
-[dependencies.ringbuf]
-version = "0.3.2"
+[dependencies.bytes]
+version = "1.4.0"
+
+[dependencies.futures]
+version = "0.3.28"
 
 [dependencies.serde]
-version = "1.0.130"
+version = "1.0.163"
 
 [dependencies.serde_json]
-version = "1.0.66"
+version = "1.0.96"
 
 [dependencies.serde_with]
 version = "3.0.0"
-#  Features:
-#  + alloc
-#  + macros
-#  + std
-#  - base64
-#  - chrono
-#  - chrono_0_4
-#  - guide
-#  - hex
-#  - indexmap
-#  - indexmap_1
-#  - json
-#  - time_0_3
+default-features = false
+features = ["json", "macros"]
 
 # discord api
 [dependencies.songbird]
 version = "0.3.2"
-features = ["driver"]
+default-features = false
+features = ["driver", "rustls"]
 
 # async framework
 [dependencies.tokio]
 version = "1.28.2"
 features = ["full", "signal"]
+
+[dependencies.tokio-util]
+version = "0.7.8"
 
 [dependencies.whisper-rs]
 version = "0.8.0"
@@ -61,9 +56,13 @@ version = "0.8.0"
 # - simd
 # - test-with-tiny-model
 
+# # # # # # # # # # # # # # # # # # # # # # # #
+# dependencies just for example code and tests
+#
+
 # command line argument parsing
 [dev-dependencies.clap]
-version = "4.3.0"
+version = "4.3.2"
 features = ["derive"]
 
 # just for testing
