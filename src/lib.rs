@@ -21,7 +21,6 @@ pub mod model {
 }
 mod scrivening {
     pub(crate) mod manager;
-    pub(crate) mod transcript_strategy;
     pub(crate) mod worker;
 }
 mod songbird_client {

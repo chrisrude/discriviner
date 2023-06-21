@@ -26,7 +26,11 @@ pub(crate) trait TranscriptStrategy {
     ///     Speaking - user starts speaking
     ///     Silent - user stops speaking for 100ms
     ///     Idle - user stops speaking for 1 second
-    fn handle_event(&mut self, event: &UserAudioEventType) -> Option<Vec<WorkerActions>>;
+    fn handle_event(
+        &mut self,
+        event: &UserAudioEventType,
+        audio_duration: &Duration,
+    ) -> Option<Vec<WorkerActions>>;
 
     fn handle_transcription(
         &mut self,

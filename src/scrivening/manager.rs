@@ -16,7 +16,7 @@ use crate::{
         constants::DISCARD_USER_AUDIO_AFTER,
         types::{UserId, VoiceChannelEvent},
     },
-    strategies::default_strategy::DefaultTranscriptStrategy,
+    strategies::five_second_strategy::FiveSecondStrategy,
 };
 
 use super::{super::Whisper, worker::UserAudioWorker};
@@ -82,7 +82,7 @@ impl UserAudioManager {
             Entry::Vacant(entry) => {
                 let (tx_worker, tx_audio) = UserAudioWorker::monitor(
                     self.shutdown_token.clone(),
-                    DefaultTranscriptStrategy::new(),
+                    FiveSecondStrategy::new(),
                     self.tx_api.clone(),
                     user_id,
                     self.whisper.clone(),

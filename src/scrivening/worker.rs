@@ -115,7 +115,7 @@ impl UserAudioWorker {
                     None
                 }
                 Some(event) = rx_event.recv() => {
-                    transcript_strategy.handle_event(&event)
+                    transcript_strategy.handle_event(&event, &self.audio_buffer.buffer_duration())
                 }
                 Ok(Some(TranscriptionResponse{ transcript })) = pending_transcription_requests.try_next() => {
                     // we got a transcription response, determine if it's a final transcription

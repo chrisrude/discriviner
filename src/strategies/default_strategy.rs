@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::time::Duration;
 
 use crate::{audio::events::UserAudioEventType, model::types::Transcription};
@@ -13,7 +14,11 @@ impl DefaultTranscriptStrategy {
 }
 
 impl TranscriptStrategy for DefaultTranscriptStrategy {
-    fn handle_event(&mut self, event: &UserAudioEventType) -> Option<Vec<WorkerActions>> {
+    fn handle_event(
+        &mut self,
+        event: &UserAudioEventType,
+        _audio_duration: &Duration,
+    ) -> Option<Vec<WorkerActions>> {
         match event {
             UserAudioEventType::Speaking => None,
             UserAudioEventType::Silent => None,

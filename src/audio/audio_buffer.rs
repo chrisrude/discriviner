@@ -134,6 +134,13 @@ impl AudioBuffer {
         rtc_timestamp: &DiscordRtcTimestamp,
         discord_audio: &[DiscordAudioSample],
     ) {
+        // if audio is entirely silent, then don't add it
+        if discord_audio
+            .iter()
+            .all(|&x| x == DiscordAudioSample::default())
+        {
+            return;
+        }
         if !self.can_fit_audio(rtc_timestamp, discord_audio) {
             eprintln!("{}: buffer full, dropping audio", self.slice_id);
             return;
@@ -257,20 +264,11 @@ impl AudioBuffer {
         // immediately, and this function will return true.
         // Otherwise, it returns false.
 
-        let start_idx = start.as_millis() as usize * WHISPER_SAMPLES_PER_MILLISECOND;
-        let end_of_silence_interval =
-            start_idx + interval_length.as_millis() as usize * WHISPER_SAMPLES_PER_MILLISECOND;
+        let desired_start_idx = start.as_millis() as usize * WHISPER_SAMPLES_PER_MILLISECOND;
+        let end_of_silence_interval = desired_start_idx
+            + interval_length.as_millis() as usize * WHISPER_SAMPLES_PER_MILLISECOND;
 
-        // we intentionally allow the start index to be one sample beyond the end of the buffer,
-        // as this is the expected case where the user actually goes silent.
-        if self.audio.len() <= start_idx {
-            eprintln!(
-                "{}: silence start interval not within buffer",
-                self.slice_id
-            );
-            return false;
-        }
-
+        let start_idx = min(desired_start_idx, self.audio.len());
         let end_idx = min(end_of_silence_interval, self.audio.len());
         self.audio[start_idx..end_idx]
             .iter()
@@ -394,8 +392,9 @@ mod tests {
         // seconds [1,2) are silent
         assert_eq!(slice.buffer_duration(), Duration::ZERO);
 
+        // silent audio should not be added, except as padding
         slice.add_audio(&(start_rtc + ONE_SECOND_RTC), &SILENT_DISCORD_AUDIO);
-        assert_eq!(slice.buffer_duration(), 2 * ONE_SECOND);
+        assert_eq!(slice.buffer_duration(), Duration::ZERO);
 
         // seconds [2,3) are noisy
         slice.add_audio(
@@ -409,7 +408,7 @@ mod tests {
             &(start_rtc + ONE_SECOND_RTC + ONE_SECOND_RTC + ONE_SECOND_RTC),
             &SILENT_DISCORD_AUDIO,
         );
-        assert_eq!(slice.buffer_duration(), 4 * ONE_SECOND);
+        assert_eq!(slice.buffer_duration(), 3 * ONE_SECOND);
 
         assert!(slice.is_interval_silent(&Duration::ZERO, &ONE_SECOND));
         assert!(slice.is_interval_silent(&(ONE_SECOND / 2), &ONE_SECOND));
@@ -418,16 +417,15 @@ mod tests {
         assert!(!slice.is_interval_silent(&(2 * ONE_SECOND), &ONE_SECOND));
         assert!(slice.is_interval_silent(&(3 * ONE_SECOND), &ONE_SECOND));
 
-        // not silent since entirely outside buffer
-        assert!(!slice.is_interval_silent(&(4 * ONE_SECOND), &ONE_SECOND));
+        assert!(slice.is_interval_silent(&(4 * ONE_SECOND), &ONE_SECOND));
 
         let duration_buffer_len_minus_one = samples_to_duration(slice.audio.len() - 1);
-        assert!(slice.is_interval_silent(&duration_buffer_len_minus_one, &ONE_SECOND));
+        assert!(!slice.is_interval_silent(&duration_buffer_len_minus_one, &ONE_SECOND));
 
         let duration_buffer_len = samples_to_duration(slice.audio.len());
-        assert!(!slice.is_interval_silent(&duration_buffer_len, &ONE_SECOND));
+        assert!(slice.is_interval_silent(&duration_buffer_len, &ONE_SECOND));
 
         let duration_buffer_len_plus_one = samples_to_duration(slice.audio.len() + 1);
-        assert!(!slice.is_interval_silent(&duration_buffer_len_plus_one, &ONE_SECOND));
+        assert!(slice.is_interval_silent(&duration_buffer_len_plus_one, &ONE_SECOND));
     }
 }
