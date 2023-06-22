@@ -19,7 +19,7 @@ use crate::{
     },
     model::{
         constants::{TOKENS_TO_KEEP, USER_SILENCE_TIMEOUT},
-        types::{Transcription, UserId, VoiceChannelEvent},
+        types::{TextSegment, TokenWithProbability, Transcription, UserId, VoiceChannelEvent},
     },
     strategies::strategy_trait::{TranscriptStrategy, WorkerActions, WorkerContext},
 };
@@ -42,6 +42,10 @@ impl Drop for UserAudioWorker {
         self.shutdown_token.cancel();
     }
 }
+
+/// If the strategy doesn't set a transcription time, we'll use this as a failsafe.
+/// This is expressed as a percentage of the audio buffer duration.
+const FAILSAFE_TRANSCRIPTION_PERCENTAGE: f32 = 0.8;
 
 impl UserAudioWorker {
     pub(crate) fn monitor<T>(
@@ -122,6 +126,12 @@ impl UserAudioWorker {
                 Ok(Some(TranscriptionResponse{ transcript })) = pending_transcription_requests.try_next() => {
                     // we got a transcription response, determine if it's a final transcription
                     // and if so send it to the API
+                    eprintln!(
+                        "received transcription ({:?} ms): {}",
+                        transcript.audio_duration,
+                        transcript.text()
+                    );
+
                     transcript_strategy.handle_transcription(&transcript, WorkerContext {
                         audio_duration: self.audio_buffer.buffer_duration(),
                         silent_after: self.audio_buffer.is_interval_silent(
@@ -145,19 +155,26 @@ impl UserAudioWorker {
                     }
                 }
             }
-            // // sanity check on the pending transcription requests
-            // if !self.audio_buffer.is_empty() {
-            //     if pending_transcription_requests.is_empty() {
-            //         let next_transcription_delay = next_transcription_time
-            //             .deadline()
-            //             .duration_since(Instant::now());
-            //         if self.audio_buffer.remaining_capacity() < next_transcription_delay {
-            //             panic!(
-            //                 "audio_buffer is not empty but pending_transcription_requests is empty"
-            //             );
-            //         }
-            //     }
-            // }
+            // sanity check on the pending transcription requests
+            if !self.audio_buffer.is_empty() {
+                if pending_transcription_requests.is_empty() {
+                    let next_transcription_delay = next_transcription_time
+                        .deadline()
+                        .duration_since(Instant::now());
+                    if self.audio_buffer.remaining_capacity() < next_transcription_delay {
+                        eprintln!(
+                            "audio_buffer is not empty but pending_transcription_requests is empty.  Adding failsafe transcription."
+                        );
+                        next_transcription_time.as_mut().reset(
+                            time::Instant::now()
+                                + time::Duration::from_secs_f32(
+                                    FAILSAFE_TRANSCRIPTION_PERCENTAGE
+                                        * self.audio_buffer.buffer_duration().as_secs_f32(),
+                                ),
+                        );
+                    }
+                }
+            }
         }
         // exit!
     }
@@ -169,7 +186,7 @@ impl UserAudioWorker {
     /// - the tokens associated with the transcription are added to last_tokens
     fn publish(
         &mut self,
-        transcription: Transcription,
+        mut transcription: Transcription,
         tx_api: &UnboundedSender<VoiceChannelEvent>,
     ) {
         // remove the audio associated with this transcription
@@ -181,6 +198,9 @@ impl UserAudioWorker {
         if transcription.segments.is_empty() {
             return;
         }
+
+        // filter out any "spurious" segments from the transcription
+        transcription.segments.retain(is_non_spurious_segment);
 
         // add the tokens from this transcription to our last_tokens
         self.last_tokens.add_all(&transcription.token_ids());
@@ -215,4 +235,67 @@ impl BoundedTokenBuffer {
     fn get(&self) -> Vec<WhisperToken> {
         self.0.iter().cloned().collect()
     }
+}
+
+fn probability_histogram(segment: &TextSegment) -> String {
+    let mut histogram = [0; 10];
+    for TokenWithProbability { p, .. } in segment.tokens_with_probability.iter() {
+        assert!(p <= &100);
+        let bucket = (p / 10) as usize;
+        if 10 == bucket {
+            // we don't have a bucket for 100%, so we'll just put it in the 90% bucket
+            histogram[9] += 1;
+        } else {
+            histogram[bucket] += 1;
+        }
+    }
+
+    const BARS: [&str; 5] = ["▯", "░", "▒", "▓", "█"];
+
+    // normalize the histogram to values 0-4
+    // sum all the tokens
+    let total = histogram.iter().sum::<usize>();
+    for count in histogram.iter_mut() {
+        if count > &mut 0 {
+            *count = (*count * (BARS.len() - 2)) / total;
+            *count += 1;
+        } else {
+            *count = 0;
+        }
+    }
+
+    let mut result = String::new();
+    result.push_str("[");
+    for count in histogram.iter() {
+        result.push_str(BARS[*count]);
+    }
+    result.push_str("] (");
+    result.push_str(&total.to_string());
+    result.push_str(" tokens)");
+    result
+}
+
+/// Whisper is great at spoken words, but isn't great at detecting
+/// when it gets audio without any spoken words.  This heuristic
+/// is to notice when it's produced a transcript which is probability
+/// not at all audio, then discard it.
+fn is_non_spurious_segment(segment: &TextSegment) -> bool {
+    eprintln!("probability: {}", probability_histogram(segment));
+
+    // discard the transcript if more than half the tokens in it have a
+    // probability of 50 or less
+    let mut low_probability_tokens = 0;
+    let mut high_probability_tokens = 0;
+    for TokenWithProbability { p, .. } in segment.tokens_with_probability.iter() {
+        if *p <= 50 {
+            low_probability_tokens += 1;
+        } else {
+            high_probability_tokens += 1;
+        }
+    }
+    let result = low_probability_tokens <= high_probability_tokens;
+    if !result {
+        eprintln!("discarding transcript segment with {} low probability tokens and {} high probability tokens", low_probability_tokens, high_probability_tokens);
+    }
+    result
 }
