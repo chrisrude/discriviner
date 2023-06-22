@@ -156,23 +156,21 @@ impl UserAudioWorker {
                 }
             }
             // sanity check on the pending transcription requests
-            if !self.audio_buffer.is_empty() {
-                if pending_transcription_requests.is_empty() {
-                    let next_transcription_delay = next_transcription_time
-                        .deadline()
-                        .duration_since(Instant::now());
-                    if self.audio_buffer.remaining_capacity() < next_transcription_delay {
-                        eprintln!(
-                            "audio_buffer is not empty but pending_transcription_requests is empty.  Adding failsafe transcription."
-                        );
-                        next_transcription_time.as_mut().reset(
-                            time::Instant::now()
-                                + time::Duration::from_secs_f32(
-                                    FAILSAFE_TRANSCRIPTION_PERCENTAGE
-                                        * self.audio_buffer.buffer_duration().as_secs_f32(),
-                                ),
-                        );
-                    }
+            if !self.audio_buffer.is_empty() && pending_transcription_requests.is_empty() {
+                let next_transcription_delay = next_transcription_time
+                    .deadline()
+                    .duration_since(Instant::now());
+                if self.audio_buffer.remaining_capacity() < next_transcription_delay {
+                    eprintln!(
+                        "audio_buffer is not empty but pending_transcription_requests is empty.  Adding failsafe transcription."
+                    );
+                    next_transcription_time.as_mut().reset(
+                        time::Instant::now()
+                            + time::Duration::from_secs_f32(
+                                FAILSAFE_TRANSCRIPTION_PERCENTAGE
+                                    * self.audio_buffer.buffer_duration().as_secs_f32(),
+                            ),
+                    );
                 }
             }
         }
@@ -265,7 +263,7 @@ fn probability_histogram(segment: &TextSegment) -> String {
     }
 
     let mut result = String::new();
-    result.push_str("[");
+    result.push('[');
     for count in histogram.iter() {
         result.push_str(BARS[*count]);
     }
