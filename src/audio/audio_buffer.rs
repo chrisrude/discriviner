@@ -60,7 +60,6 @@ impl AudioBuffer {
     }
 
     pub fn clear(&mut self) {
-        eprintln!("{}: clearing audio slice", self.slice_id);
         self.audio.clear();
         self.start_time = None;
     }
@@ -94,12 +93,12 @@ impl AudioBuffer {
         previous_tokens: Vec<WhisperToken>,
     ) -> Option<TranscriptionRequest> {
         self.start_time.map(|start_time| TranscriptionRequest {
-                audio_bytes: self.get_bytes(),
-                audio_duration: self.buffer_duration(),
-                previous_tokens,
-                start_timestamp: start_time.1,
-                user_id: self.slice_id,
-            })
+            audio_bytes: self.get_bytes(),
+            audio_duration: self.buffer_duration(),
+            previous_tokens,
+            start_timestamp: start_time.1,
+            user_id: self.slice_id,
+        })
     }
 
     /// True if the given audio can entirely fit within this slice.
@@ -120,6 +119,15 @@ impl AudioBuffer {
             return false;
         }
         true
+    }
+
+    pub fn remaining_capacity(&self) -> Duration {
+        let remaining = WHISPER_AUDIO_BUFFER_SIZE - self.audio.len();
+        samples_to_duration(remaining)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.audio.is_empty() && self.start_time.is_none()
     }
 
     /// Adds the given audio to the slice, resampling it from the

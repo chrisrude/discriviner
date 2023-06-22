@@ -107,8 +107,6 @@ impl UserAudioWorker {
                                 self.whisper
                                 .process_transcription_request(transcription_request)
                             );
-                        } else {
-                            eprintln!("WARNING: we have a pending transcription request.  Ignoring second one.");
                         }
                     }
                     next_transcription_time.as_mut().reset(never);
@@ -147,6 +145,19 @@ impl UserAudioWorker {
                     }
                 }
             }
+            // // sanity check on the pending transcription requests
+            // if !self.audio_buffer.is_empty() {
+            //     if pending_transcription_requests.is_empty() {
+            //         let next_transcription_delay = next_transcription_time
+            //             .deadline()
+            //             .duration_since(Instant::now());
+            //         if self.audio_buffer.remaining_capacity() < next_transcription_delay {
+            //             panic!(
+            //                 "audio_buffer is not empty but pending_transcription_requests is empty"
+            //             );
+            //         }
+            //     }
+            // }
         }
         // exit!
     }

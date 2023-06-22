@@ -2,13 +2,49 @@ use std::time::Duration;
 
 use crate::{
     audio::events::UserAudioEventType,
-    model::{constants::USER_SILENCE_TIMEOUT, types::Transcription},
+    model::{
+        constants::{AUDIO_TO_RECORD, USER_SILENCE_TIMEOUT},
+        types::{TokenWithProbability, Transcription},
+    },
 };
 
 use super::strategy_trait::{TranscriptStrategy, WorkerActions, WorkerContext};
 
 const FIRST_TRANSCRIPT_PERIOD: Duration = Duration::from_secs(5);
 const SUBSEQUENT_TRANSCRIPT_PERIOD: Duration = Duration::from_secs(1);
+
+fn probability_histogram(transcript: &Transcription) -> String {
+    let mut histogram = [0; 10];
+    for TokenWithProbability { p, .. } in transcript
+        .segments
+        .iter()
+        .flat_map(|s| s.tokens_with_probability.iter())
+    {
+        assert!(*p <= 100);
+        let bucket = (p / 10) as usize;
+        if 10 == bucket {
+            // we don't have a bucket for 100%, so we'll just put it in the 90% bucket
+            histogram[9] += 1;
+        } else {
+            histogram[bucket] += 1;
+        }
+    }
+    // normalize the histogram to values 0-4
+    let max = histogram.iter().max().unwrap_or(&0).clone();
+    if max == 0 {
+        return String::from("no tokens");
+    }
+    for count in histogram.iter_mut() {
+        *count = (*count * 4) / max;
+    }
+
+    const BARS: [&str; 5] = ["▯", "░", "▒", "▓", "█"];
+    let mut result = String::new();
+    for count in histogram.iter() {
+        result.push_str(BARS[*count]);
+    }
+    result
+}
 
 pub(crate) struct FiveSecondStrategy {
     tentative_transcript_opt: Option<Transcription>,
@@ -84,8 +120,15 @@ impl TranscriptStrategy for FiveSecondStrategy {
             transcript.audio_duration,
             transcript.text()
         );
+        if !transcript.is_empty() {
+            eprintln!("probability: {}", probability_histogram(transcript),);
+        }
 
-        if context.silent_after {
+        // if we've filled our buffer up at least 2/3 of the
+        // way, just take what we have.  It's possible that
+        // whisper is only ever going to give us a single segment.
+        let running_out_of_space = context.audio_duration >= (2 * AUDIO_TO_RECORD / 3);
+        if context.silent_after || running_out_of_space {
             // if the time after the end of the transcript is silent,
             // then we can return the transcript as-is.
             return Some(vec![WorkerActions::Publish(transcript.clone())]);
