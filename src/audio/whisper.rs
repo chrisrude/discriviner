@@ -6,8 +6,13 @@ use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperToken};
 
 use crate::{
     audio::events::{TranscriptionRequest, TranscriptionResponse},
-    model::types::{TextSegment, TokenWithProbability, Transcription, WhisperAudioSample},
+    model::{
+        constants::DONT_EVEN_BOTHER_RMS_THRESHOLD,
+        types::{TextSegment, TokenWithProbability, Transcription, WhisperAudioSample},
+    },
 };
+
+use super::audio_buffer::rms_over_slice;
 
 pub(crate) struct Whisper {
     whisper_context: Arc<WhisperContext>,
@@ -74,6 +79,14 @@ impl Whisper {
             )
         };
 
+        // optimization: calculate RMS over the given range,
+        // and if it's less than 0.001 then don't bother sending
+        // the audio to the model.
+        let rms = rms_over_slice(audio_data);
+        if rms < DONT_EVEN_BOTHER_RMS_THRESHOLD {
+            return Vec::new();
+        }
+
         let mut state = whisper_context.create_state().unwrap();
 
         // actually convert audio to text.  Takes a while.
@@ -119,7 +132,7 @@ impl Whisper {
 
     fn ignore_token(token_text: &str) -> bool {
         // Ignore tokens of the form [_*]
-        token_text.starts_with("[_") && token_text.ends_with(']')
+        "<|endoftext|>" == token_text || token_text.starts_with("[_") && token_text.ends_with(']')
     }
 
     fn make_params(previous_tokens: &Vec<WhisperToken>) -> FullParams<'_, '_> {
@@ -132,7 +145,7 @@ impl Whisper {
 
         params.set_tokens(previous_tokens.as_slice());
         params.set_suppress_blank(true);
-        params.set_suppress_non_speech_tokens(false);
+        params.set_suppress_non_speech_tokens(true);
 
         params
     }

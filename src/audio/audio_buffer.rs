@@ -44,6 +44,17 @@ fn samples_to_duration(num_samples: usize) -> Duration {
     Duration::from_millis((num_samples / WHISPER_SAMPLES_PER_MILLISECOND) as u64)
 }
 
+fn duration_to_index(duration: &Duration) -> usize {
+    duration.as_millis() as usize * WHISPER_SAMPLES_PER_MILLISECOND
+}
+
+pub fn rms_over_slice(audio_data: &[WhisperAudioSample]) -> f32 {
+    // sum the squares of the samples in the range
+    let sum_squares = audio_data.iter().map(|x| x * x).sum::<f32>();
+    // divide by the number of samples, and take the square root
+    (sum_squares / audio_data.len() as f32).sqrt()
+}
+
 pub(crate) struct AudioBuffer {
     pub audio: Vec<WhisperAudioSample>,
     pub slice_id: u64,
@@ -253,6 +264,11 @@ impl AudioBuffer {
         samples_to_duration(self.audio.len())
     }
 
+    pub fn rms_over_interval(&self, start: &Duration, interval_length: &Duration) -> f32 {
+        let (idx_start, idx_end) = self.clamped_range(start, interval_length);
+        rms_over_slice(&self.audio[idx_start..idx_end])
+    }
+
     /// Returns true only if the period from [start, start + interval_length] contains
     /// only silence.  If none of the period is in the buffer, then this returns false.
     /// If only part of the period is in the buffer, and all of that period is silence,
@@ -268,15 +284,20 @@ impl AudioBuffer {
         // immediately, and this function will return true.
         // Otherwise, it returns false.
 
-        let desired_start_idx = start.as_millis() as usize * WHISPER_SAMPLES_PER_MILLISECOND;
-        let end_of_silence_interval = desired_start_idx
-            + interval_length.as_millis() as usize * WHISPER_SAMPLES_PER_MILLISECOND;
-
-        let start_idx = min(desired_start_idx, self.audio.len());
-        let end_idx = min(end_of_silence_interval, self.audio.len());
-        self.audio[start_idx..end_idx]
+        let (idx_start, idx_end) = self.clamped_range(start, interval_length);
+        self.audio[idx_start..idx_end]
             .iter()
             .all(|&sample| sample == WhisperAudioSample::default())
+    }
+
+    fn clamped_range(&self, start: &Duration, interval_length: &Duration) -> (usize, usize) {
+        let idx_start = duration_to_index(start);
+        let idx_end = idx_start + duration_to_index(interval_length);
+
+        let idx_start = min(idx_start, self.audio.len());
+        let idx_end = min(idx_end, self.audio.len());
+
+        (idx_start, idx_end)
     }
 }
 

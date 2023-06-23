@@ -36,3 +36,5 @@ pub(crate) const WHISPER_AUDIO_BUFFER_SIZE: usize =
 
 // 31.68 years is BASICALLY forever, said my niece
 pub(crate) const FOREVER: Duration = Duration::from_secs(1000 * 1000 * 1000);
+
+pub(crate) const DONT_EVEN_BOTHER_RMS_THRESHOLD: f32 = 0.01;

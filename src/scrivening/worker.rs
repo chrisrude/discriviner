@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, sync::Arc};
+use std::{collections::VecDeque, sync::Arc, time::Duration};
 
 use futures::{stream::FuturesUnordered, TryStreamExt};
 use tokio::{
@@ -131,6 +131,7 @@ impl UserAudioWorker {
                         transcript.audio_duration,
                         transcript.text()
                     );
+                    self.print_rms(&transcript);
 
                     transcript_strategy.handle_transcription(&transcript, WorkerContext {
                         audio_duration: self.audio_buffer.buffer_duration(),
@@ -191,14 +192,14 @@ impl UserAudioWorker {
         self.audio_buffer
             .discard_audio(&transcription.audio_duration);
 
+        // filter out any "spurious" segments from the transcription
+        transcription.segments.retain(is_non_spurious_segment);
+
         // if the transcription is empty, don't send it.
         // we still needed to remove the audio, though.
         if transcription.segments.is_empty() {
             return;
         }
-
-        // filter out any "spurious" segments from the transcription
-        transcription.segments.retain(is_non_spurious_segment);
 
         // add the tokens from this transcription to our last_tokens
         self.last_tokens.add_all(&transcription.token_ids());
@@ -207,6 +208,49 @@ impl UserAudioWorker {
         tx_api
             .send(VoiceChannelEvent::Transcription(transcription))
             .unwrap();
+    }
+
+    fn print_rms(&self, transcription: &Transcription) {
+        // before we drop the audio data, calculate the RMS energy
+        // of the audio data and add it to the transcription
+        if let Some((_, start_time)) = self.audio_buffer.start_time {
+            if transcription.start_timestamp != start_time {
+                eprintln!(
+                    "transcription start time ({:?}) does not match audio buffer start time ({:?})",
+                    transcription.start_timestamp, start_time
+                );
+            } else {
+                // take the RMS over the whole duration
+                let audio_rms = self
+                    .audio_buffer
+                    .rms_over_interval(&Duration::ZERO, &transcription.audio_duration);
+                eprintln!(
+                    "transcription ({:?} ms) rms: {}",
+                    transcription.audio_duration.as_millis(),
+                    audio_rms
+                );
+
+                // also, do it for all the segments.
+                // Obviously we can do this more efficiently, but this is just for debugging.
+                for (i, segment) in transcription.segments.iter().enumerate() {
+                    let segment_start = Duration::from_millis(segment.start_offset_ms as u64);
+                    let segment_length = Duration::from_millis(
+                        (segment.end_offset_ms - segment.start_offset_ms) as u64,
+                    );
+                    let audio_rms = self
+                        .audio_buffer
+                        .rms_over_interval(&segment_start, &segment_length);
+                    eprintln!(
+                        "segment {} ({:?} ms) rms: {}",
+                        i,
+                        segment_length.as_millis(),
+                        audio_rms
+                    );
+                }
+            }
+        } else {
+            eprintln!("audio buffer has no start time");
+        }
     }
 }
 
