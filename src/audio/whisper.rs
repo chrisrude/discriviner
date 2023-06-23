@@ -92,6 +92,10 @@ impl Whisper {
                 let token_id = state.full_get_token_id(i, j).unwrap();
                 let probability = (state.full_get_token_prob(i, j).unwrap() * 100.0) as u32;
 
+                if Self::ignore_token(token_text.as_str()) {
+                    continue;
+                }
+
                 tokens_with_probability.push(TokenWithProbability {
                     p: probability,
                     token_id,
@@ -113,6 +117,11 @@ impl Whisper {
         segments
     }
 
+    fn ignore_token(token_text: &str) -> bool {
+        // Ignore tokens of the form [_*]
+        token_text.starts_with("[_") && token_text.ends_with(']')
+    }
+
     fn make_params(previous_tokens: &Vec<WhisperToken>) -> FullParams<'_, '_> {
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
 
@@ -123,7 +132,7 @@ impl Whisper {
 
         params.set_tokens(previous_tokens.as_slice());
         params.set_suppress_blank(true);
-        params.set_suppress_non_speech_tokens(true);
+        params.set_suppress_non_speech_tokens(false);
 
         params
     }
