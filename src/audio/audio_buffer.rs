@@ -10,8 +10,8 @@ use whisper_rs::WhisperToken;
 use crate::model::{
     constants::{
         AUDIO_TO_RECORD, BITRATE_CONVERSION_RATIO, DISCORD_AUDIO_CHANNELS,
-        RTC_CLOCK_SAMPLES_PER_MILLISECOND, WHISPER_AUDIO_BUFFER_SIZE,
-        WHISPER_SAMPLES_PER_MILLISECOND,
+        DONT_EVEN_BOTHER_RMS_THRESHOLD, RTC_CLOCK_SAMPLES_PER_MILLISECOND,
+        WHISPER_AUDIO_BUFFER_SIZE, WHISPER_SAMPLES_PER_MILLISECOND,
     },
     types::{
         DiscordAudioSample, DiscordRtcTimestamp, DiscordRtcTimestampInner, WhisperAudioSample,
@@ -285,9 +285,11 @@ impl AudioBuffer {
         // Otherwise, it returns false.
 
         let (idx_start, idx_end) = self.clamped_range(start, interval_length);
-        self.audio[idx_start..idx_end]
+        let slice = &self.audio[idx_start..idx_end];
+        slice
             .iter()
             .all(|&sample| sample == WhisperAudioSample::default())
+            || (rms_over_slice(slice) < DONT_EVEN_BOTHER_RMS_THRESHOLD)
     }
 
     fn clamped_range(&self, start: &Duration, interval_length: &Duration) -> (usize, usize) {
