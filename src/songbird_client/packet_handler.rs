@@ -253,12 +253,14 @@ pub(crate) fn register_events(raw_handler: PacketHandler, driver: &mut songbird:
             packet_handler: handler,
             handler: |ctx, my_handler| {
                 if let EventContext::DriverReconnect(connect_data) = ctx {
-                    my_handler
-                        .tx_api_events
-                        .send(VoiceChannelEvent::Reconnect(ConnectData::from(
-                            connect_data,
-                        )))
-                        .unwrap();
+                    match my_handler.tx_api_events.send(VoiceChannelEvent::Reconnect(
+                        ConnectData::from(connect_data),
+                    )) {
+                        Ok(_) => {} // everything is fine
+                        Err(_) => {
+                            eprintln!("Reconnect event not sent (expected when exiting)");
+                        }
+                    };
                 }
             },
         },

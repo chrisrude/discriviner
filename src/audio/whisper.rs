@@ -101,9 +101,28 @@ impl Whisper {
             let mut tokens_with_probability =
                 Vec::<TokenWithProbability>::with_capacity(num_tokens as usize);
             for j in 0..num_tokens {
-                let token_text = state.full_get_token_text(i, j).unwrap();
-                let token_id = state.full_get_token_id(i, j).unwrap();
-                let probability = (state.full_get_token_prob(i, j).unwrap() * 100.0) as u32;
+                let token_text = match state.full_get_token_text(i, j) {
+                    Ok(token_text) => token_text,
+                    Err(err) => {
+                        eprintln!("Failed to get token text, skipping token: {:?}", err);
+                        continue;
+                    }
+                };
+                let token_id = match state.full_get_token_id(i, j) {
+                    Ok(token_id) => token_id,
+                    Err(err) => {
+                        eprintln!("Failed to get token id, setting to 1: {:?}", err);
+                        1
+                    }
+                };
+                let raw_prob = match state.full_get_token_prob(i, j) {
+                    Ok(prob) => prob,
+                    Err(err) => {
+                        eprintln!("Failed to get token prob, setting to 1%: {:?}", err);
+                        0.01
+                    }
+                };
+                let probability = (raw_prob * 100.0) as u32;
 
                 if Self::ignore_token(token_text.as_str()) {
                     continue;
@@ -112,11 +131,29 @@ impl Whisper {
                 tokens_with_probability.push(TokenWithProbability {
                     p: probability,
                     token_id,
-                    token_text: token_text.to_string(),
+                    token_text,
                 });
             }
-            let start_offset_ms = 10 * state.full_get_segment_t0(i).unwrap() as u32;
-            let end_offset_ms = 10 * state.full_get_segment_t1(i).unwrap() as u32;
+            let start_offset_ms = 10
+                * match state.full_get_segment_t0(i) {
+                    Ok(offset_ms) => offset_ms as u32,
+                    Err(err) => {
+                        eprintln!("Failed to get segment t0, setting to {}: {:?}", err, i);
+                        i as u32
+                    }
+                } as u32;
+            let end_offset_ms = 10
+                * match state.full_get_segment_t1(i) {
+                    Ok(offset_ms) => offset_ms as u32,
+                    Err(err) => {
+                        eprintln!(
+                            "Failed to get segment t1, setting to {}: {:?}",
+                            err,
+                            start_offset_ms + 1
+                        );
+                        start_offset_ms + 1
+                    }
+                } as u32;
             eprintln!(
                 "Segment {} is {}ms to {}ms",
                 i, start_offset_ms, end_offset_ms

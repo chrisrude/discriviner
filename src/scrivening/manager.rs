@@ -5,7 +5,10 @@ use std::{
 };
 
 use tokio::{
-    sync::{self, mpsc::UnboundedSender},
+    sync::{
+        self,
+        mpsc::{error::SendError, UnboundedSender},
+    },
     task,
 };
 use tokio_util::sync::CancellationToken;
@@ -96,15 +99,30 @@ impl UserAudioManager {
     /// the given user, and then call the given function with a
     /// mutable reference to that buffer.
     fn send_to_worker(&mut self, event: UserAudioEvent) {
-        let (tx_worker, _, last_activity) = self.get_worker(event.user_id);
-        tx_worker.send(event.event_type).unwrap();
-        *last_activity = Instant::now();
+        let (tx_worker, _, _) = self.get_worker(event.user_id);
+        let result = tx_worker.send(event.event_type);
+        self.handle_send_response(event.user_id, result);
     }
 
     fn send_audio_to_worker(&mut self, audio: DiscordAudioData) {
-        let (_, tx_audio, last_activity) = self.get_worker(audio.user_id);
-        tx_audio.send(audio).unwrap();
-        *last_activity = Instant::now();
+        let user_id = audio.user_id;
+        let (_, tx_audio, _) = self.get_worker(user_id);
+        let result = tx_audio.send(audio);
+        self.handle_send_response(user_id, result);
+    }
+
+    fn handle_send_response<T>(&mut self, user_id: UserId, response: Result<(), SendError<T>>) {
+        match response {
+            Ok(_) => {
+                let (_, _, last_activity) = self.get_worker(user_id);
+                *last_activity = Instant::now();
+            }
+            Err(err) => {
+                eprintln!("Failed to send audio to worker: {}", err);
+                // the worker has shut down, so we can remove it from the map
+                self.user_audio_map.remove(&user_id);
+            }
+        }
     }
 
     /// Worker function, which will loop forever, processing audio

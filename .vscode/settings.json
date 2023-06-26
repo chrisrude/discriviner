@@ -1,5 +1,6 @@
 {
     "cSpell.words": [
+        "Blackman",
         "buflength",
         "curr",
         "Demux",
@@ -9,6 +10,7 @@
         "DONT",
         "downsampler",
         "downsamples",
+        "endoftext",
         "espeak",
         "espeakng",
         "guildless",
@@ -16,8 +18,10 @@
         "oneshot",
         "plock",
         "Poisonless",
+        "resampler",
         "ringbuf",
         "scrivening",
+        "Sinc",
         "ssid",
         "Ssrc",
         "unixsecs",

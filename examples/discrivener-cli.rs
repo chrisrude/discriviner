@@ -1,5 +1,4 @@
 use clap::Parser;
-use colored::Colorize;
 use discrivener::model::types::{Transcription, VoiceChannelEvent};
 use discrivener::Discrivener;
 use std::sync::Arc;
@@ -24,16 +23,11 @@ fn on_text(message: Transcription, log_performance: bool) {
 
     let mut first: bool = true;
     for segment in message.segments {
-        // todo: color code based on probability
         if first {
-            println!(
-                "{} says: {}",
-                message.user_id.to_string().bright_green(),
-                segment.text().bold(),
-            );
+            println!("{} says: {}", message.user_id.to_string(), segment.text(),);
             first = false;
         } else {
-            println!("\t\t\t {}", segment.text().bold());
+            println!("\t\t\t {}", segment.text());
         }
     }
 }
@@ -48,11 +42,11 @@ async fn tokio_main(cli: Cli) {
             VoiceChannelEvent::Connect(status) => {
                 println!(
                     "Connection status: {} to channel #{}",
-                    "connected".bright_green(),
+                    "connected",
                     if let Some(channel_id) = status.channel_id {
-                        channel_id.to_string().bright_green()
+                        channel_id.to_string()
                     } else {
-                        "unknown".bright_red()
+                        "unknown".to_string()
                     }
                 )
             }
@@ -65,16 +59,16 @@ async fn tokio_main(cli: Cli) {
             VoiceChannelEvent::Reconnect(status) => {
                 println!(
                     "Connection status: {} to channel #{}",
-                    "reconnected".bright_green(),
+                    "reconnected",
                     if let Some(channel_id) = status.channel_id {
-                        channel_id.to_string().bright_green()
+                        channel_id.to_string()
                     } else {
-                        "unknown".bright_red()
+                        "unknown".to_string()
                     }
                 )
             }
             VoiceChannelEvent::Disconnect(_) => {
-                println!("Connection status: {}", "disconnected".bright_red());
+                println!("Connection status: {}", "disconnected");
             }
             VoiceChannelEvent::ChannelSilent(silent) => {
                 if silent {

@@ -101,12 +101,15 @@ impl UserIdleDetector {
         }) = self.idle_times.pop()
         {
             assert!(idle_timeout <= Instant::now());
-            self.tx_silent_user_events
-                .send(UserAudioEvent {
-                    user_id,
-                    event_type: UserAudioEventType::Idle,
-                })
-                .unwrap();
+            match self.tx_silent_user_events.send(UserAudioEvent {
+                user_id,
+                event_type: UserAudioEventType::Idle,
+            }) {
+                Ok(_) => {} // everything's fine
+                Err(err) => {
+                    eprintln!("Failed to send idle event to audio thread, {:?}", err);
+                }
+            }
         }
     }
 
@@ -195,7 +198,14 @@ impl VoiceActivity {
                         _ => {}
                     };
                     // forward silent events to the main audio listener
-                    self.tx_silent_user_events.send(event).unwrap();
+                    match self.tx_silent_user_events.send(event) {
+                        Ok(_) => {} // everything's fine, continue
+                        Err(_) => {
+                            // the main audio listener has been dropped
+                            // we can stop now
+                            return;
+                        }
+                    };
                 }
             }
         }

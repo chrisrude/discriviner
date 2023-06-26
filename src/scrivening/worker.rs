@@ -205,9 +205,12 @@ impl UserAudioWorker {
         self.last_tokens.add_all(&transcription.token_ids());
 
         // send the transcription to the API
-        tx_api
-            .send(VoiceChannelEvent::Transcription(transcription))
-            .unwrap();
+        match tx_api.send(VoiceChannelEvent::Transcription(transcription)) {
+            Ok(_) => {} // everything is fine
+            Err(err) => {
+                eprintln!("error sending transcription to API: {}", err);
+            }
+        }
     }
 
     fn print_rms(&self, transcription: &Transcription) {

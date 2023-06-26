@@ -10,7 +10,6 @@ crate-type = ["lib"]
 # note: if this fails to build on osx, you might need
 # to install cmake
 #   brew install cmake
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 # helper for async framework
 [dependencies.async-trait]
@@ -18,8 +17,6 @@ version = "0.1.68"
 
 [dependencies.bytes]
 version = "1.4.0"
-
-# more joy at https://github.com/Better-Player/libbetterplayer/blob/master/src/ffi/espeakng.rs
 
 [dependencies.espeakng-sys]
 git = "https://github.com/Better-Player/espeakng-sys/"
@@ -61,13 +58,12 @@ version = "0.7.8"
 
 [dependencies.whisper-rs]
 version = "0.8.0"
+
 #features = ["cuda"]
-#path = "../whisper-rs"
 # - coreml
 # - cuda
 # - opencl
 # - simd
-# - test-with-tiny-model
 
 # # # # # # # # # # # # # # # # # # # # # # # #
 # dependencies just for example code and tests
@@ -77,10 +73,6 @@ version = "0.8.0"
 [dev-dependencies.clap]
 version = "4.3.2"
 features = ["derive"]
-
-# just for testing
-[dev-dependencies.colored]
-version = "2.0.0"
 
 [dev-dependencies.discrivener]
 path = "./"
