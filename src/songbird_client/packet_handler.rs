@@ -143,7 +143,7 @@ pub(crate) fn register_events(raw_handler: PacketHandler, driver: Arc<Mutex<song
         songbird::CoreEvent::SpeakingStateUpdate.into(),
         MyEventHandler {
             packet_handler: handler.clone(),
-            handler: |ctx, my_handler| {
+            handler: move |ctx, my_handler| {
                 if let EventContext::SpeakingStateUpdate(Speaking {
                     speaking,
                     ssrc,
@@ -172,7 +172,7 @@ pub(crate) fn register_events(raw_handler: PacketHandler, driver: Arc<Mutex<song
         songbird::CoreEvent::SpeakingUpdate.into(),
         MyEventHandler {
             packet_handler: handler.clone(),
-            handler: |ctx, my_handler| {
+            handler: move |ctx, my_handler| {
                 if let EventContext::SpeakingUpdate(SpeakingUpdateData { ssrc, speaking, .. }) = ctx
                 {
                     // Called when a user starts or stops speaking.
@@ -189,7 +189,7 @@ pub(crate) fn register_events(raw_handler: PacketHandler, driver: Arc<Mutex<song
         songbird::CoreEvent::VoicePacket.into(),
         MyEventHandler {
             packet_handler: handler.clone(),
-            handler: |ctx, my_handler| {
+            handler: move |ctx, my_handler| {
                 if let EventContext::VoicePacket(VoiceData {
                     audio: Some(discord_audio),
                     packet,
@@ -207,7 +207,7 @@ pub(crate) fn register_events(raw_handler: PacketHandler, driver: Arc<Mutex<song
         songbird::CoreEvent::ClientDisconnect.into(),
         MyEventHandler {
             packet_handler: handler.clone(),
-            handler: |ctx, my_handler| {
+            handler: move |ctx, my_handler| {
                 if let EventContext::ClientDisconnect(
                     songbird::model::payload::ClientDisconnect { user_id, .. },
                 ) = ctx
@@ -222,7 +222,7 @@ pub(crate) fn register_events(raw_handler: PacketHandler, driver: Arc<Mutex<song
         songbird::CoreEvent::DriverConnect.into(),
         MyEventHandler {
             packet_handler: handler.clone(),
-            handler: |ctx, my_handler| {
+            handler: move |ctx, my_handler| {
                 if let EventContext::DriverConnect(connect_data) = ctx {
                     my_handler
                         .tx_api_events
@@ -236,7 +236,7 @@ pub(crate) fn register_events(raw_handler: PacketHandler, driver: Arc<Mutex<song
         songbird::CoreEvent::DriverDisconnect.into(),
         MyEventHandler {
             packet_handler: handler.clone(),
-            handler: |ctx, my_handler| {
+            handler: move |ctx, my_handler| {
                 if let EventContext::DriverDisconnect(disconnect_data) = ctx {
                     let result = my_handler.tx_api_events.send(VoiceChannelEvent::Disconnect(
                         DisconnectData::from(disconnect_data),
@@ -252,7 +252,7 @@ pub(crate) fn register_events(raw_handler: PacketHandler, driver: Arc<Mutex<song
         songbird::CoreEvent::DriverReconnect.into(),
         MyEventHandler {
             packet_handler: handler,
-            handler: |ctx, my_handler| {
+            handler: move |ctx, my_handler| {
                 if let EventContext::DriverReconnect(connect_data) = ctx {
                     match my_handler.tx_api_events.send(VoiceChannelEvent::Reconnect(
                         ConnectData::from(connect_data),
