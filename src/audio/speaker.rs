@@ -8,13 +8,11 @@ use songbird::input::{reader::MediaSource, Reader};
 pub fn speak_to_reader(message: &str, sample_rate: usize) -> Reader {
     let spoken = crate::audio::espeakng::speak(message);
 
-    let output_buffer;
-    if spoken.sample_rate as usize == sample_rate {
-        output_buffer = spoken.wav;
+    let output_buffer = if spoken.sample_rate as usize == sample_rate {
+        spoken.wav
     } else {
-        output_buffer =
-            crate::audio::resample::resample(spoken.sample_rate as usize, sample_rate, &spoken.wav);
-    }
+        crate::audio::resample::resample(spoken.sample_rate as usize, sample_rate, &spoken.wav)
+    };
 
     Reader::Extension(Box::new(VecMediaSource::new(output_buffer)))
 }
