@@ -12,7 +12,6 @@ pub fn speak_to_reader(message: &str, sample_rate: usize) -> Reader {
     if spoken.sample_rate as usize == sample_rate {
         output_buffer = spoken.wav;
     } else {
-        let conversion_ratio = sample_rate as f64 / spoken.sample_rate as f64;
         output_buffer =
             crate::audio::resample::resample(spoken.sample_rate as usize, sample_rate, &spoken.wav);
     }
@@ -50,7 +49,7 @@ impl io::Read for VecMediaSource {
         // copy data into buf
         buf[..bytes_to_read].copy_from_slice(&self.data[self.pos..self.pos + bytes_to_read]);
         self.pos += bytes_to_read;
-        return Ok(bytes_to_read);
+        Ok(bytes_to_read)
     }
 }
 

@@ -350,5 +350,5 @@ fn is_valid_segment(segment: &TextSegment) -> bool {
         );
         return false;
     }
-    return true;
+    true
 }

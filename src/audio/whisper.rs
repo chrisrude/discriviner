@@ -141,7 +141,7 @@ impl Whisper {
                         eprintln!("Failed to get segment t0, setting to {}: {:?}", err, i);
                         i as u32
                     }
-                } as u32;
+                };
             let end_offset_ms = 10
                 * match state.full_get_segment_t1(i) {
                     Ok(offset_ms) => offset_ms as u32,
@@ -153,7 +153,7 @@ impl Whisper {
                         );
                         start_offset_ms + 1
                     }
-                } as u32;
+                };
             eprintln!(
                 "Segment {} is {}ms to {}ms",
                 i, start_offset_ms, end_offset_ms

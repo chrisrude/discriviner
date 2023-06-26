@@ -109,7 +109,7 @@ unsafe extern "C" fn synth_callback(
     events: *mut espeak_EVENT,
 ) -> c_int {
     // Calculate the length of the events array
-    let mut events_copy = events.clone();
+    let mut events_copy = events;
     let mut elem_count = 0;
     while (*events_copy).type_ != espeak_EVENT_TYPE_espeakEVENT_LIST_TERMINATED {
         elem_count += 1;
@@ -120,16 +120,16 @@ unsafe extern "C" fn synth_callback(
     // We must clone from the slice, as the provided array's memory is managed by C
     let event_slice = std::slice::from_raw_parts_mut(events, elem_count);
     let event_vec = event_slice
-        .into_iter()
-        .map(|f| f.clone())
+        .iter_mut()
+        .map(|f| *f)
         .collect::<Vec<espeak_EVENT>>();
 
     // Turn the audio wav data array into a Vec.
     // We must clone from the slice, as the provided array's memory is managed by C
     let wav_slice = std::slice::from_raw_parts_mut(wav, sample_count as usize);
     let mut wav_vec = wav_slice
-        .into_iter()
-        .map(|f| f.clone() as i16)
+        .iter_mut()
+        .map(|f| *f)
         .collect::<Vec<i16>>();
 
     // Determine if this is the end of the synth

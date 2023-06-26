@@ -61,7 +61,6 @@ pub(crate) fn resample(from_sample_rate: usize, to_sample_rate: usize, data: &[i
     let mut data_f64 = data
         .iter()
         .map(|x| *x as f64 / i16::MAX as f64)
-        .into_iter()
         .chain(iter::repeat(0.0));
 
     let out_frames = calc_output_frames(data.len(), resample_ratio);

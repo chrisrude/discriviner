@@ -24,7 +24,7 @@ fn on_text(message: Transcription, log_performance: bool) {
     let mut first: bool = true;
     for segment in message.segments {
         if first {
-            println!("{} says: {}", message.user_id.to_string(), segment.text(),);
+            println!("{} says: {}", message.user_id, segment.text(),);
             first = false;
         } else {
             println!("\t\t\t {}", segment.text());
@@ -41,8 +41,7 @@ async fn tokio_main(cli: Cli) {
             VoiceChannelEvent::Transcription(message) => on_text(message, log_performance),
             VoiceChannelEvent::Connect(status) => {
                 println!(
-                    "Connection status: {} to channel #{}",
-                    "connected",
+                    "Connection status: connected to channel #{}",
                     if let Some(channel_id) = status.channel_id {
                         channel_id.to_string()
                     } else {
@@ -58,8 +57,7 @@ async fn tokio_main(cli: Cli) {
             }
             VoiceChannelEvent::Reconnect(status) => {
                 println!(
-                    "Connection status: {} to channel #{}",
-                    "reconnected",
+                    "Connection status: reconnected to channel #{}",
                     if let Some(channel_id) = status.channel_id {
                         channel_id.to_string()
                     } else {
@@ -68,7 +66,7 @@ async fn tokio_main(cli: Cli) {
                 )
             }
             VoiceChannelEvent::Disconnect(_) => {
-                println!("Connection status: {}", "disconnected");
+                println!("Connection status: disconnected");
             }
             VoiceChannelEvent::ChannelSilent(silent) => {
                 if silent {
