@@ -37,8 +37,9 @@ async fn tokio_main(cli: Cli) {
         let mut line = String::with_capacity(120);
         select! {
             _ = stdin_reader.read_line(&mut line) => {
+                line = line.trim().to_string();
                 eprintln!("Speaking: '{}'", line);
-                // discrivener.speak(line.as_str());
+                discrivener.speak(line);
             }
             _ = signal::ctrl_c() => {
                 break;

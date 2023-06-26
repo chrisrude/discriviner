@@ -1,6 +1,9 @@
+use std::sync::{Arc, Mutex};
+
 use audio::events::{DiscordAudioData, UserAudioEvent};
+use audio::speaker::Speaker;
 use audio::whisper::Whisper;
-use model::constants::{DISCORD_SAMPLES_PER_SECOND, USER_SILENCE_TIMEOUT};
+use model::constants::USER_SILENCE_TIMEOUT;
 use model::types::VoiceChannelEvent;
 use scrivening::manager::UserAudioManager;
 use songbird::id::{ChannelId, GuildId, UserId};
@@ -40,8 +43,10 @@ pub struct Discrivener {
     // task which will fire API change events
     api_task: Option<JoinHandle<()>>,
     audio_buffer_manager_task: Option<JoinHandle<()>>,
-    driver: songbird::Driver,
+    driver: Arc<Mutex<songbird::Driver>>,
     shutdown_token: CancellationToken,
+    speaker: Option<JoinHandle<()>>,
+    tx_speaker: tokio::sync::mpsc::UnboundedSender<String>,
     voice_activity_task: Option<JoinHandle<()>>,
 }
 
@@ -60,6 +65,7 @@ impl Discrivener {
             tokio::sync::mpsc::unbounded_channel::<VoiceChannelEvent>();
         let (tx_silent_user_events, rx_silent_user_events) =
             tokio::sync::mpsc::unbounded_channel::<UserAudioEvent>();
+        let (tx_speaker, rx_speaker) = tokio::sync::mpsc::unbounded_channel::<String>();
         let (tx_voice_activity, rx_voice_activity) =
             tokio::sync::mpsc::unbounded_channel::<UserAudioEvent>();
 
@@ -82,19 +88,33 @@ impl Discrivener {
             whisper,
         ));
 
-        let mut driver = songbird::Driver::new(config);
-        PacketHandler::register(&mut driver, tx_api_events, tx_audio_data, tx_voice_activity);
+        let driver = Arc::new(Mutex::new(songbird::Driver::new(config)));
+        PacketHandler::register(
+            driver.clone(),
+            tx_api_events,
+            tx_audio_data,
+            tx_voice_activity,
+        );
 
         let api_task = Some(tokio::spawn(Self::start_api_task(
             rx_api_events,
             shutdown_token.clone(),
             event_callback,
         )));
+
+        let speaker = Some(Speaker::monitor(
+            driver.clone(),
+            rx_speaker,
+            shutdown_token.clone(),
+        ));
+
         Self {
             api_task,
             audio_buffer_manager_task,
             driver,
             shutdown_token,
+            speaker,
+            tx_speaker,
             voice_activity_task,
         }
     }
@@ -116,13 +136,13 @@ impl Discrivener {
             token: voice_token.to_string(),
             user_id: UserId::from(user_id),
         };
-        self.driver.connect(connection_info).await
+        self.driver.lock().unwrap().connect(connection_info).await
     }
 
     pub async fn disconnect(&mut self) {
         eprintln!("Driver disconnecting");
-        self.driver.stop();
-        self.driver.leave();
+        self.driver.try_lock().unwrap().stop();
+        self.driver.try_lock().unwrap().leave();
         eprintln!("Setting shutdown token");
         self.shutdown_token.cancel();
 
@@ -136,6 +156,8 @@ impl Discrivener {
             .await
             .unwrap();
         eprintln!("Audio buffer manager task complete");
+        self.speaker.take().unwrap().await.unwrap();
+        eprintln!("Speaker task complete");
         self.voice_activity_task.take().unwrap().await.unwrap();
         eprintln!("Voice activity task complete");
     }
@@ -158,18 +180,7 @@ impl Discrivener {
         }
     }
 
-    pub fn speak(&mut self, message: &str) {
-        let reader = crate::audio::speaker::speak_to_reader(message, DISCORD_SAMPLES_PER_SECOND);
-
-        let input = songbird::input::Input::new(
-            false,
-            reader,
-            songbird::input::Codec::Pcm,
-            songbird::input::Container::Raw,
-            Default::default(),
-        );
-
-        // todo: do something with handle?
-        self.driver.play_only_source(input);
+    pub fn speak(&mut self, message: String) {
+        self.tx_speaker.send(message).unwrap();
     }
 }

@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::Mutex;
 
 /// Manages multiple buffers for each user who is speaking.
 /// Tracks when users have stopped speaking, and fires a callback.
@@ -31,7 +32,7 @@ pub(crate) struct PacketHandler {
 
 impl PacketHandler {
     pub(crate) fn register(
-        driver: &mut songbird::Driver,
+        driver: Arc<Mutex<songbird::Driver>>,
         tx_api_events: UnboundedSender<VoiceChannelEvent>,
         tx_audio_data: UnboundedSender<DiscordAudioData>,
         tx_voice_activity: UnboundedSender<UserAudioEvent>,
@@ -135,10 +136,10 @@ where
     }
 }
 
-pub(crate) fn register_events(raw_handler: PacketHandler, driver: &mut songbird::Driver) {
+pub(crate) fn register_events(raw_handler: PacketHandler, driver: Arc<Mutex<songbird::Driver>>) {
     let handler = Arc::new(raw_handler);
     // event handlers for the songbird driver
-    driver.add_global_event(
+    driver.lock().unwrap().add_global_event(
         songbird::CoreEvent::SpeakingStateUpdate.into(),
         MyEventHandler {
             packet_handler: handler.clone(),
@@ -167,7 +168,7 @@ pub(crate) fn register_events(raw_handler: PacketHandler, driver: &mut songbird:
             },
         },
     );
-    driver.add_global_event(
+    driver.lock().unwrap().add_global_event(
         songbird::CoreEvent::SpeakingUpdate.into(),
         MyEventHandler {
             packet_handler: handler.clone(),
@@ -184,7 +185,7 @@ pub(crate) fn register_events(raw_handler: PacketHandler, driver: &mut songbird:
             },
         },
     );
-    driver.add_global_event(
+    driver.lock().unwrap().add_global_event(
         songbird::CoreEvent::VoicePacket.into(),
         MyEventHandler {
             packet_handler: handler.clone(),
@@ -202,7 +203,7 @@ pub(crate) fn register_events(raw_handler: PacketHandler, driver: &mut songbird:
             },
         },
     );
-    driver.add_global_event(
+    driver.lock().unwrap().add_global_event(
         songbird::CoreEvent::ClientDisconnect.into(),
         MyEventHandler {
             packet_handler: handler.clone(),
@@ -217,7 +218,7 @@ pub(crate) fn register_events(raw_handler: PacketHandler, driver: &mut songbird:
             },
         },
     );
-    driver.add_global_event(
+    driver.lock().unwrap().add_global_event(
         songbird::CoreEvent::DriverConnect.into(),
         MyEventHandler {
             packet_handler: handler.clone(),
@@ -231,7 +232,7 @@ pub(crate) fn register_events(raw_handler: PacketHandler, driver: &mut songbird:
             },
         },
     );
-    driver.add_global_event(
+    driver.lock().unwrap().add_global_event(
         songbird::CoreEvent::DriverDisconnect.into(),
         MyEventHandler {
             packet_handler: handler.clone(),
@@ -247,7 +248,7 @@ pub(crate) fn register_events(raw_handler: PacketHandler, driver: &mut songbird:
             },
         },
     );
-    driver.add_global_event(
+    driver.lock().unwrap().add_global_event(
         songbird::CoreEvent::DriverReconnect.into(),
         MyEventHandler {
             packet_handler: handler,
