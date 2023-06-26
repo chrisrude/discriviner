@@ -23,6 +23,7 @@
         "resampler",
         "ringbuf",
         "scrivening",
+        "seekable",
         "Sinc",
         "ssid",
         "Ssrc",

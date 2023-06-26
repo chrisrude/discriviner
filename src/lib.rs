@@ -1,7 +1,6 @@
-use audio::espeakng::Spoken;
 use audio::events::{DiscordAudioData, UserAudioEvent};
 use audio::whisper::Whisper;
-use model::constants::USER_SILENCE_TIMEOUT;
+use model::constants::{DISCORD_SAMPLES_PER_SECOND, USER_SILENCE_TIMEOUT};
 use model::types::VoiceChannelEvent;
 use scrivening::manager::UserAudioManager;
 use songbird::id::{ChannelId, GuildId, UserId};
@@ -15,6 +14,8 @@ mod audio {
     pub(crate) mod audio_buffer;
     pub(crate) mod espeakng;
     pub(crate) mod events;
+    pub(crate) mod resample;
+    pub(crate) mod speaker;
     pub(crate) mod whisper;
 }
 pub mod model {
@@ -89,7 +90,6 @@ impl Discrivener {
             shutdown_token.clone(),
             event_callback,
         )));
-
         Self {
             api_task,
             audio_buffer_manager_task,
@@ -157,13 +157,12 @@ impl Discrivener {
         }
     }
 
-    pub fn play_file(&mut self, filename: &str) {
-        // i16, 48khz, 1 channel?
-        let audio_file = std::fs::File::open(filename).unwrap();
+    pub fn speak(&mut self, message: &str) {
+        let reader = crate::audio::speaker::speak_to_reader(message, DISCORD_SAMPLES_PER_SECOND);
 
         let input = songbird::input::Input::new(
             false,
-            songbird::input::Reader::from_file(audio_file),
+            reader,
             songbird::input::Codec::Pcm,
             songbird::input::Container::Raw,
             Default::default(),
@@ -172,8 +171,4 @@ impl Discrivener {
         // todo: do something with handle?
         self.driver.play_only_source(input);
     }
-}
-
-pub fn speak(text: &str) -> Spoken {
-    audio::espeakng::speak(text)
 }

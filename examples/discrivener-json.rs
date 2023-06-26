@@ -2,7 +2,10 @@ use clap::Parser;
 use discrivener::Discrivener;
 
 use std::sync::Arc;
-use tokio::signal;
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    select, signal,
+};
 
 #[tokio::main]
 async fn tokio_main(cli: Cli) {
@@ -30,8 +33,21 @@ async fn tokio_main(cli: Cli) {
         eprintln!("Error joining voice channel: {}", e);
     }
 
-    signal::ctrl_c().await.unwrap();
-    eprintln!("Disconnecting...");
+    let mut stdin_reader = BufReader::new(tokio::io::stdin());
+    loop {
+        let mut line = String::with_capacity(120);
+        select! {
+            _ = stdin_reader.read_line(&mut line) => {
+                eprintln!("Speaking: '{}'", line);
+                discrivener.speak(line.as_str());
+            }
+            _ = signal::ctrl_c() => {
+                eprintln!("Disconnecting...");
+                discrivener.disconnect().await;
+                break;
+            }
+        }
+    }
     discrivener.disconnect().await;
 }
 
