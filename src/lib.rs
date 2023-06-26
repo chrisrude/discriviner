@@ -1,3 +1,4 @@
+use audio::espeakng::Spoken;
 use audio::events::{DiscordAudioData, UserAudioEvent};
 use audio::whisper::Whisper;
 use model::constants::USER_SILENCE_TIMEOUT;
@@ -12,6 +13,7 @@ use tokio_util::sync::CancellationToken;
 
 mod audio {
     pub(crate) mod audio_buffer;
+    pub(crate) mod espeakng;
     pub(crate) mod events;
     pub(crate) mod whisper;
 }
@@ -154,4 +156,24 @@ impl Discrivener {
             }
         }
     }
+
+    pub fn play_file(&mut self, filename: &str) {
+        // i16, 48khz, 1 channel?
+        let audio_file = std::fs::File::open(filename).unwrap();
+
+        let input = songbird::input::Input::new(
+            false,
+            songbird::input::Reader::from_file(audio_file),
+            songbird::input::Codec::Pcm,
+            songbird::input::Container::Raw,
+            Default::default(),
+        );
+
+        // todo: do something with handle?
+        self.driver.play_only_source(input);
+    }
+}
+
+pub fn speak(text: &str) -> Spoken {
+    audio::espeakng::speak(text)
 }

@@ -2,6 +2,7 @@
 name = "discrivener"
 version = "0.2.0"
 edition = "2021"
+resolver = "2"
 
 [lib]
 crate-type = ["lib"]
@@ -18,8 +19,20 @@ version = "0.1.68"
 [dependencies.bytes]
 version = "1.4.0"
 
+# more joy at https://github.com/Better-Player/libbetterplayer/blob/master/src/ffi/espeakng.rs
+
+[dependencies.espeakng-sys]
+git = "https://github.com/Better-Player/espeakng-sys/"
+features = ["clang-runtime"]
+
 [dependencies.futures]
 version = "0.3.28"
+
+[dependencies.lazy_static]
+version = "1.4.0"
+
+[dependencies.rubato]
+version = "0.14.0"
 
 [dependencies.serde]
 version = "1.0.163"

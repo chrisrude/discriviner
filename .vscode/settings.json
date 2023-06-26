@@ -1,5 +1,7 @@
 {
     "cSpell.words": [
+        "buflength",
+        "curr",
         "Demux",
         "Demuxer",
         "Deque",
@@ -7,8 +9,13 @@
         "DONT",
         "downsampler",
         "downsamples",
+        "espeak",
+        "espeakng",
         "guildless",
+        "numsamples",
         "oneshot",
+        "plock",
+        "Poisonless",
         "ringbuf",
         "scrivening",
         "ssid",
