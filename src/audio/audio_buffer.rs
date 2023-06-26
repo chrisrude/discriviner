@@ -408,12 +408,15 @@ mod tests {
             [0; STEREO_SAMPLES_PER_SECOND];
 
         const NOISY_DISCORD_AUDIO: [DiscordAudioSample; STEREO_SAMPLES_PER_SECOND] =
-            [123; STEREO_SAMPLES_PER_SECOND];
+            [DiscordAudioSample::MAX / 2; STEREO_SAMPLES_PER_SECOND];
 
         const ONE_SECOND_RTC: Wrapping<u32> =
             Wrapping(1000 * RTC_CLOCK_SAMPLES_PER_MILLISECOND as u32);
 
         const ONE_SECOND: Duration = Duration::from_secs(1);
+
+        const NEAR_SILENT_DISCORD_AUDIO: [DiscordAudioSample; STEREO_SAMPLES_PER_SECOND] =
+            [1 as DiscordAudioSample; STEREO_SAMPLES_PER_SECOND];
 
         // seconds [0,1) will be silent, since we'll auto-pad with silence
         // seconds [1,2) are silent
@@ -437,6 +440,12 @@ mod tests {
         );
         assert_eq!(slice.buffer_duration(), 3 * ONE_SECOND);
 
+        // seconds [4,5) are nearly silent, and should be considered silent in our test
+        slice.add_audio(
+            &(start_rtc + ONE_SECOND_RTC + ONE_SECOND_RTC + ONE_SECOND_RTC + ONE_SECOND_RTC),
+            &NEAR_SILENT_DISCORD_AUDIO,
+        );
+
         assert!(slice.is_interval_silent(&Duration::ZERO, &ONE_SECOND));
         assert!(slice.is_interval_silent(&(ONE_SECOND / 2), &ONE_SECOND));
         assert!(slice.is_interval_silent(&(1 * ONE_SECOND), &ONE_SECOND));
@@ -447,7 +456,7 @@ mod tests {
         assert!(slice.is_interval_silent(&(4 * ONE_SECOND), &ONE_SECOND));
 
         let duration_buffer_len_minus_one = samples_to_duration(slice.audio.len() - 1);
-        assert!(!slice.is_interval_silent(&duration_buffer_len_minus_one, &ONE_SECOND));
+        assert!(slice.is_interval_silent(&duration_buffer_len_minus_one, &ONE_SECOND));
 
         let duration_buffer_len = samples_to_duration(slice.audio.len());
         assert!(slice.is_interval_silent(&duration_buffer_len, &ONE_SECOND));
