@@ -47,6 +47,10 @@ impl Drop for UserAudioWorker {
 /// This is expressed as a percentage of the audio buffer duration.
 const FAILSAFE_TRANSCRIPTION_PERCENTAGE: f32 = 0.8;
 
+/// if we have this many tokens in a single segment, we'll assume the
+/// AI is hallucinating and ignore it
+const OUTRAGEOUSLY_MANY_TOKENS: usize = 100;
+
 impl UserAudioWorker {
     pub(crate) fn monitor<T>(
         shutdown_token: CancellationToken,
@@ -162,9 +166,6 @@ impl UserAudioWorker {
                     .deadline()
                     .duration_since(Instant::now());
                 if self.audio_buffer.remaining_capacity() < next_transcription_delay {
-                    eprintln!(
-                        "audio_buffer is not empty but pending_transcription_requests is empty.  Adding failsafe transcription."
-                    );
                     next_transcription_time.as_mut().reset(
                         time::Instant::now()
                             + time::Duration::from_secs_f32(
@@ -193,7 +194,7 @@ impl UserAudioWorker {
             .discard_audio(&transcription.audio_duration);
 
         // filter out any "spurious" segments from the transcription
-        transcription.segments.retain(is_non_spurious_segment);
+        transcription.segments.retain(is_valid_segment);
 
         // if the transcription is empty, don't send it.
         // we still needed to remove the audio, though.
@@ -324,7 +325,7 @@ fn probability_histogram(segment: &TextSegment) -> String {
 /// when it gets audio without any spoken words.  This heuristic
 /// is to notice when it's produced a transcript which is probability
 /// not at all audio, then discard it.
-fn is_non_spurious_segment(segment: &TextSegment) -> bool {
+fn is_valid_segment(segment: &TextSegment) -> bool {
     eprintln!("probability: {}", probability_histogram(segment));
 
     // discard the transcript if more than half the tokens in it have a
@@ -338,9 +339,16 @@ fn is_non_spurious_segment(segment: &TextSegment) -> bool {
             high_probability_tokens += 1;
         }
     }
-    let result = low_probability_tokens <= high_probability_tokens;
-    if !result {
+    if low_probability_tokens > high_probability_tokens {
         eprintln!("discarding transcript segment with {} low probability tokens and {} high probability tokens", low_probability_tokens, high_probability_tokens);
+        return false;
     }
-    result
+    if (low_probability_tokens + high_probability_tokens) >= OUTRAGEOUSLY_MANY_TOKENS {
+        eprintln!(
+            "discarding transcript segment with {} tokens: too many to be real!",
+            low_probability_tokens + high_probability_tokens
+        );
+        return false;
+    }
+    return true;
 }
