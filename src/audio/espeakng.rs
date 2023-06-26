@@ -76,7 +76,7 @@ pub fn speak(text: &str) -> Spoken {
     match unsafe { espeak_Synchronize() } {
         espeak_ERROR_EE_OK => {}
         espeak_ERROR_EE_INTERNAL_ERROR => {
-            todo!()
+            eprintln!("espeak-ng: Internal error");
         }
         _ => unreachable!(),
     }
@@ -127,10 +127,7 @@ unsafe extern "C" fn synth_callback(
     // Turn the audio wav data array into a Vec.
     // We must clone from the slice, as the provided array's memory is managed by C
     let wav_slice = std::slice::from_raw_parts_mut(wav, sample_count as usize);
-    let mut wav_vec = wav_slice
-        .iter_mut()
-        .map(|f| *f)
-        .collect::<Vec<i16>>();
+    let mut wav_vec = wav_slice.iter_mut().map(|f| *f).collect::<Vec<i16>>();
 
     // Determine if this is the end of the synth
     let mut is_end = false;

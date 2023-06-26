@@ -120,7 +120,8 @@ impl Discrivener {
     }
 
     pub async fn disconnect(&mut self) {
-        eprintln!("Driver leaving");
+        eprintln!("Driver disconnecting");
+        self.driver.stop();
         self.driver.leave();
         eprintln!("Setting shutdown token");
         self.shutdown_token.cancel();

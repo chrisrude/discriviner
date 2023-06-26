@@ -1,13 +1,12 @@
 use clap::Parser;
 use discrivener::Discrivener;
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     select, signal,
 };
 
-#[tokio::main]
 async fn tokio_main(cli: Cli) {
     let mut discrivener = Discrivener::load(
         cli.model_path,
@@ -39,16 +38,16 @@ async fn tokio_main(cli: Cli) {
         select! {
             _ = stdin_reader.read_line(&mut line) => {
                 eprintln!("Speaking: '{}'", line);
-                discrivener.speak(line.as_str());
+                // discrivener.speak(line.as_str());
             }
             _ = signal::ctrl_c() => {
-                eprintln!("Disconnecting...");
-                discrivener.disconnect().await;
                 break;
             }
         }
     }
+    eprintln!("Disconnecting...");
     discrivener.disconnect().await;
+    eprintln!("Disconnected gracefully");
 }
 
 /// Connect to a discord voice channel
@@ -82,5 +81,14 @@ struct Cli {
 
 fn main() {
     let args = Cli::parse();
-    tokio_main(args);
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    runtime.block_on(tokio_main(args));
+
+    // see https://github.com/tokio-rs/tokio/issues/2318
+    // for why this is necessary.
+    runtime.shutdown_timeout(Duration::from_secs(0));
 }
