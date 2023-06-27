@@ -82,9 +82,8 @@ unsafe extern "C" fn synth_callback(
         } else {
             let new_audio = std::slice::from_raw_parts(wav, sample_count as usize);
             // add new_audio to the task's wav
-            task_opt
-                .as_mut()
-                .map(|task| task.wav.extend_from_slice(new_audio));
+            if let Some(task) = task_opt
+                .as_mut() { task.wav.extend_from_slice(new_audio) }
         }
     }
 

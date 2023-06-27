@@ -1,7 +1,4 @@
-use std::{
-    io,
-    sync::{Arc, Mutex},
-};
+use std::{io, sync::Arc};
 
 use bytes::Bytes;
 use songbird::input::{reader::MediaSource, Reader};
@@ -11,14 +8,14 @@ use tokio_util::sync::CancellationToken;
 use crate::model::constants::DISCORD_SAMPLES_PER_SECOND;
 
 pub(crate) struct Speaker {
-    driver: Arc<Mutex<songbird::Driver>>,
+    driver: Arc<tokio::sync::Mutex<songbird::Driver>>,
     rx: UnboundedReceiver<String>,
     shutdown_token: CancellationToken,
 }
 
 impl Speaker {
     pub(crate) fn monitor(
-        driver: Arc<Mutex<songbird::Driver>>,
+        driver: Arc<tokio::sync::Mutex<songbird::Driver>>,
         rx: UnboundedReceiver<String>,
         shutdown_token: CancellationToken,
     ) -> JoinHandle<()> {
@@ -50,7 +47,7 @@ impl Speaker {
                             Default::default(),
                         );
                         eprintln!("Sending to driver");
-                        self.driver.lock().unwrap().play_only_source(input);
+                        self.driver.lock().await.play_only_source(input);
                         eprintln!("Sent to driver");
                     }
                 }

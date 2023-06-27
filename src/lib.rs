@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use audio::events::{DiscordAudioData, UserAudioEvent};
 use audio::speaker::Speaker;
@@ -43,7 +43,8 @@ pub struct Discrivener {
     // task which will fire API change events
     api_task: Option<JoinHandle<()>>,
     audio_buffer_manager_task: Option<JoinHandle<()>>,
-    driver: Arc<Mutex<songbird::Driver>>,
+    // use tokio mutex as it's held during an .await
+    driver: Arc<tokio::sync::Mutex<songbird::Driver>>,
     shutdown_token: CancellationToken,
     speaker: Option<JoinHandle<()>>,
     tx_speaker: tokio::sync::mpsc::UnboundedSender<String>,
@@ -88,13 +89,14 @@ impl Discrivener {
             whisper,
         ));
 
-        let driver = Arc::new(Mutex::new(songbird::Driver::new(config)));
+        let driver = Arc::new(tokio::sync::Mutex::new(songbird::Driver::new(config)));
         PacketHandler::register(
             driver.clone(),
             tx_api_events,
             tx_audio_data,
             tx_voice_activity,
-        );
+        )
+        .await;
 
         let api_task = Some(tokio::spawn(Self::start_api_task(
             rx_api_events,
@@ -136,7 +138,7 @@ impl Discrivener {
             token: voice_token.to_string(),
             user_id: UserId::from(user_id),
         };
-        self.driver.lock().unwrap().connect(connection_info).await
+        self.driver.lock().await.connect(connection_info).await
     }
 
     pub async fn disconnect(&mut self) {
