@@ -26,10 +26,6 @@ lazy_static! {
     static ref in_process_task_opt: Mutex<Option<GenerationTask>> = Mutex::new(None);
 }
 pub fn init() -> i32 {
-    eprintln!(
-        "Initializing espeakng on thread {}",
-        std::thread::current().name().unwrap_or("unknown")
-    );
     unsafe {
         let sample_rate = espeak_Initialize(
             // send data to our callback function, which will
@@ -66,11 +62,6 @@ unsafe extern "C" fn synth_callback(
     sample_count: c_int,
     _events: *mut espeak_EVENT,
 ) -> c_int {
-    eprintln!(
-        "synth_callback on thread {}",
-        std::thread::current().name().unwrap_or("unknown")
-    );
-
     {
         let mut task_opt = in_process_task_opt.lock().unwrap();
         // it seems the callback can happen after we finish receiving
@@ -102,11 +93,6 @@ unsafe extern "C" fn synth_callback(
 
 /// Perform Text-To-Speech
 pub async fn speak(text: &str) -> Vec<i16> {
-    eprintln!(
-        "speak on thread {}",
-        std::thread::current().name().unwrap_or("unknown")
-    );
-
     let (tx, rx) = oneshot::channel::<Vec<i16>>();
 
     // there best not be another transcription in progress!
