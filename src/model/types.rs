@@ -271,8 +271,6 @@ impl Transcription {
             }
         }
 
-        // eprintln!("first_segments: {:?}", first_segments);
-
         let mut first_duration = first_segments
             .iter()
             .map(|segment| Duration::from_millis(segment.end_offset_ms as u64))

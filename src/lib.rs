@@ -142,26 +142,19 @@ impl Discrivener {
     }
 
     pub async fn disconnect(&mut self) {
-        eprintln!("Driver disconnecting");
         self.driver.try_lock().unwrap().stop();
         self.driver.try_lock().unwrap().leave();
-        eprintln!("Setting shutdown token");
         self.shutdown_token.cancel();
 
         // join all our tasks
-        eprintln!("Waiting for tasks to finish");
         self.api_task.take().unwrap().await.unwrap();
-        eprintln!("API task complete");
         self.audio_buffer_manager_task
             .take()
             .unwrap()
             .await
             .unwrap();
-        eprintln!("Audio buffer manager task complete");
         self.speaker.take().unwrap().await.unwrap();
-        eprintln!("Speaker task complete");
         self.voice_activity_task.take().unwrap().await.unwrap();
-        eprintln!("Voice activity task complete");
     }
 
     async fn start_api_task(

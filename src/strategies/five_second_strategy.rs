@@ -15,12 +15,16 @@ const SUBSEQUENT_TRANSCRIPT_PERIOD: Duration = Duration::from_secs(1);
 
 pub(crate) struct FiveSecondStrategy {
     tentative_transcript_opt: Option<Transcription>,
+    tentative_transcripts_used: usize,
+    tentative_transcripts_total: usize,
 }
 
 impl FiveSecondStrategy {
     pub(crate) fn new() -> Self {
         FiveSecondStrategy {
             tentative_transcript_opt: None,
+            tentative_transcripts_used: 0,
+            tentative_transcripts_total: 0,
         }
     }
 
@@ -64,6 +68,7 @@ impl TranscriptStrategy for FiveSecondStrategy {
                 // transcript as-is.
                 if let Some(tentative_transcript) = self.tentative_transcript_opt.take() {
                     if audio_duration == &tentative_transcript.audio_duration {
+                        self.tentative_transcripts_used += 1;
                         return Some(vec![WorkerActions::Publish(tentative_transcript)]);
                     }
                 }
@@ -107,10 +112,13 @@ impl TranscriptStrategy for FiveSecondStrategy {
             == tentative_transcript.audio_duration
             && !tentative_transcript.is_empty()
         {
-            eprintln!(
-                "Saving tentative transcript: {}",
-                tentative_transcript.text()
-            );
+            self.tentative_transcripts_total += 1;
+            if 0 == self.tentative_transcripts_total % 10 {
+                eprintln!(
+                    "{} tentative transcripts, {} used",
+                    self.tentative_transcripts_total, self.tentative_transcripts_used
+                );
+            }
             Some(tentative_transcript)
         } else {
             None

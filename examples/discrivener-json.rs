@@ -12,7 +12,6 @@ async fn tokio_main(cli: Cli) {
         cli.model_path,
         Arc::new(|event| {
             let json_string = serde_json::to_string(&event).unwrap();
-            // eprintln!("API Event: {:?}", json_string);
             println!("{}", json_string);
         }),
     )
@@ -38,7 +37,6 @@ async fn tokio_main(cli: Cli) {
         select! {
             _ = stdin_reader.read_line(&mut line) => {
                 line = line.trim().to_string();
-                eprintln!("Speaking: '{}'", line);
                 discrivener.speak(line);
             }
             _ = signal::ctrl_c() => {
@@ -46,9 +44,7 @@ async fn tokio_main(cli: Cli) {
             }
         }
     }
-    eprintln!("Disconnecting...");
     discrivener.disconnect().await;
-    eprintln!("Disconnected gracefully");
 }
 
 /// Connect to a discord voice channel

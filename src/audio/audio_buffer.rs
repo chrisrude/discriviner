@@ -57,6 +57,7 @@ pub fn rms_over_slice(audio_data: &[WhisperAudioSample]) -> f32 {
 
 pub(crate) struct AudioBuffer {
     pub audio: Vec<WhisperAudioSample>,
+    pub dropped_audio_frames: usize,
     pub slice_id: u64,
     pub start_time: Option<(DiscordRtcTimestamp, SystemTime)>,
 }
@@ -65,6 +66,7 @@ impl AudioBuffer {
     pub fn new(slice_id: u64) -> Self {
         Self {
             audio: Vec::with_capacity(WHISPER_AUDIO_BUFFER_SIZE),
+            dropped_audio_frames: 0,
             slice_id,
             start_time: None,
         }
@@ -72,6 +74,7 @@ impl AudioBuffer {
 
     pub fn clear(&mut self) {
         self.audio.clear();
+        self.dropped_audio_frames = 0;
         self.start_time = None;
     }
 
@@ -114,7 +117,7 @@ impl AudioBuffer {
 
     /// True if the given audio can entirely fit within this slice.
     pub fn can_fit_audio(
-        &self,
+        &mut self,
         rtc_timestamp: &DiscordRtcTimestamp,
         discord_audio: &[DiscordAudioSample],
     ) -> bool {
@@ -122,11 +125,15 @@ impl AudioBuffer {
 
         if !self.fits_within_this_slice(rtc_timestamp + rtc_length) {
             // if the timestamp is not within the bounds of this slice,
-            // then we need to create a new slice.
-            eprintln!(
-                "{}: trying to add audio to inactive slice, dropping audio",
-                self.slice_id
-            );
+            // drop the audio.
+            self.dropped_audio_frames += 1;
+            // quick and dirty log() calculation to reduce log spamming
+            if 1 == self.dropped_audio_frames.count_ones() {
+                eprintln!(
+                    "{}: buffer full, dropping audio.  {} frames dropped so far.",
+                    self.slice_id, self.dropped_audio_frames
+                );
+            }
             return false;
         }
         true
@@ -157,7 +164,6 @@ impl AudioBuffer {
             return;
         }
         if !self.can_fit_audio(rtc_timestamp, discord_audio) {
-            eprintln!("{}: buffer full, dropping audio", self.slice_id);
             return;
         }
 
@@ -233,12 +239,6 @@ impl AudioBuffer {
         if duration.is_zero() {
             return;
         }
-
-        eprintln!(
-            "discarding {} ms of audio from {} ms buffer",
-            duration.as_millis(),
-            self.buffer_duration().as_millis()
-        );
 
         if discard_idx >= self.audio.len() {
             // discard as much as we have, so just clear the buffer

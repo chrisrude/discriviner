@@ -37,7 +37,6 @@ impl Speaker {
                         break;
                     }
                     Some(message) = self.rx.recv() => {
-                        eprintln!("Received message: {}", message);
                         let reader = speak_to_reader(&message, DISCORD_SAMPLES_PER_SECOND, espeakng_sample_rate).await;
                         let input = songbird::input::Input::new(
                             false,
@@ -46,9 +45,7 @@ impl Speaker {
                             songbird::input::Container::Raw,
                             Default::default(),
                         );
-                        eprintln!("Sending to driver");
                         self.driver.lock().await.play_only_source(input);
-                        eprintln!("Sent to driver");
                     }
                 }
             }

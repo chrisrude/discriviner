@@ -154,10 +154,6 @@ impl Whisper {
                         start_offset_ms + 1
                     }
                 };
-            eprintln!(
-                "Segment {} is {}ms to {}ms",
-                i, start_offset_ms, end_offset_ms
-            );
             segments.push(TextSegment {
                 start_offset_ms,
                 end_offset_ms,

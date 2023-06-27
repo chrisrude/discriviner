@@ -130,12 +130,14 @@ impl UserAudioWorker {
                 Ok(Some(TranscriptionResponse{ transcript })) = pending_transcription_requests.try_next() => {
                     // we got a transcription response, determine if it's a final transcription
                     // and if so send it to the API
-                    eprintln!(
-                        "received transcription ({:?} ms): {}",
-                        transcript.audio_duration,
-                        transcript.text()
-                    );
-                    self.print_rms(&transcript);
+                    if !transcript.is_empty() {
+                        eprintln!(
+                            "received transcription ({:?} ms): {}",
+                            transcript.audio_duration,
+                            transcript.text()
+                        );
+                        self.print_rms(&transcript);
+                    }
 
                     transcript_strategy.handle_transcription(&transcript, WorkerContext {
                         audio_duration: self.audio_buffer.buffer_duration(),
@@ -217,43 +219,44 @@ impl UserAudioWorker {
     fn print_rms(&self, transcription: &Transcription) {
         // before we drop the audio data, calculate the RMS energy
         // of the audio data and add it to the transcription
-        if let Some((_, start_time)) = self.audio_buffer.start_time {
-            if transcription.start_timestamp != start_time {
-                eprintln!(
-                    "transcription start time ({:?}) does not match audio buffer start time ({:?})",
-                    transcription.start_timestamp, start_time
-                );
-            } else {
-                // take the RMS over the whole duration
+        if self.audio_buffer.start_time.is_none() {
+            eprintln!("audio buffer has no start time");
+            return;
+        }
+        let (_, start_time) = self.audio_buffer.start_time.unwrap();
+
+        if transcription.start_timestamp != start_time {
+            eprintln!(
+                "transcription start time ({:?}) does not match audio buffer start time ({:?})",
+                transcription.start_timestamp, start_time
+            );
+        } else {
+            // take the RMS over the whole duration
+            let audio_rms = self
+                .audio_buffer
+                .rms_over_interval(&Duration::ZERO, &transcription.audio_duration);
+            eprintln!(
+                "transcription ({:?} ms) rms: {}",
+                transcription.audio_duration.as_millis(),
+                audio_rms
+            );
+
+            // also, do it for all the segments.
+            // Obviously we can do this more efficiently, but this is just for debugging.
+            for (i, segment) in transcription.segments.iter().enumerate() {
+                let segment_start = Duration::from_millis(segment.start_offset_ms as u64);
+                let segment_length =
+                    Duration::from_millis((segment.end_offset_ms - segment.start_offset_ms) as u64);
                 let audio_rms = self
                     .audio_buffer
-                    .rms_over_interval(&Duration::ZERO, &transcription.audio_duration);
+                    .rms_over_interval(&segment_start, &segment_length);
                 eprintln!(
-                    "transcription ({:?} ms) rms: {}",
-                    transcription.audio_duration.as_millis(),
+                    "segment {} ({:?} ms) rms: {}",
+                    i,
+                    segment_length.as_millis(),
                     audio_rms
                 );
-
-                // also, do it for all the segments.
-                // Obviously we can do this more efficiently, but this is just for debugging.
-                for (i, segment) in transcription.segments.iter().enumerate() {
-                    let segment_start = Duration::from_millis(segment.start_offset_ms as u64);
-                    let segment_length = Duration::from_millis(
-                        (segment.end_offset_ms - segment.start_offset_ms) as u64,
-                    );
-                    let audio_rms = self
-                        .audio_buffer
-                        .rms_over_interval(&segment_start, &segment_length);
-                    eprintln!(
-                        "segment {} ({:?} ms) rms: {}",
-                        i,
-                        segment_length.as_millis(),
-                        audio_rms
-                    );
-                }
             }
-        } else {
-            eprintln!("audio buffer has no start time");
         }
     }
 }
@@ -326,8 +329,6 @@ fn probability_histogram(segment: &TextSegment) -> String {
 /// is to notice when it's produced a transcript which is probability
 /// not at all audio, then discard it.
 fn is_valid_segment(segment: &TextSegment) -> bool {
-    eprintln!("probability: {}", probability_histogram(segment));
-
     // discard the transcript if more than half the tokens in it have a
     // probability of 50 or less
     let mut low_probability_tokens = 0;
@@ -340,6 +341,7 @@ fn is_valid_segment(segment: &TextSegment) -> bool {
         }
     }
     if low_probability_tokens > high_probability_tokens {
+        eprintln!("probability: {}", probability_histogram(segment));
         eprintln!("discarding transcript segment with {} low probability tokens and {} high probability tokens", low_probability_tokens, high_probability_tokens);
         return false;
     }
