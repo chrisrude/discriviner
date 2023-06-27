@@ -31,6 +31,8 @@ impl Speaker {
     }
 
     fn run_forever(mut self) {
+        let espeakng_sample_rate = crate::audio::espeakng::init() as usize;
+
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -39,7 +41,7 @@ impl Speaker {
                     }
                     Some(message) = self.rx.recv() => {
                         eprintln!("Received message: {}", message);
-                        let reader = speak_to_reader(&message, DISCORD_SAMPLES_PER_SECOND);
+                        let reader = speak_to_reader(&message, DISCORD_SAMPLES_PER_SECOND, espeakng_sample_rate).await;
                         let input = songbird::input::Input::new(
                             false,
                             reader,
@@ -59,14 +61,21 @@ impl Speaker {
 
 /// Renders the given text as speech, encoded as mono
 /// i16 PCM at the given sample rate.
-fn speak_to_reader(message: &str, sample_rate: usize) -> Reader {
-    crate::audio::espeakng::speak(message);
-    let spoken = crate::audio::espeakng::speak(message);
+async fn speak_to_reader(
+    message: &str,
+    discord_sample_rate: usize,
+    espeakng_sample_rate: usize,
+) -> Reader {
+    let audio = crate::audio::espeakng::speak(message).await;
 
-    let output_buffer = if spoken.sample_rate as usize == sample_rate {
-        spoken.wav
+    let output_buffer = if espeakng_sample_rate == discord_sample_rate {
+        audio
     } else {
-        crate::audio::resample::resample(spoken.sample_rate as usize, sample_rate, &spoken.wav)
+        crate::audio::resample::resample(
+            espeakng_sample_rate,
+            discord_sample_rate,
+            audio.as_slice(),
+        )
     };
 
     Reader::Extension(Box::new(VecMediaSource::new(output_buffer)))

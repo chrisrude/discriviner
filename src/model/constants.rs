@@ -38,3 +38,5 @@ pub(crate) const WHISPER_AUDIO_BUFFER_SIZE: usize =
 pub(crate) const FOREVER: Duration = Duration::from_secs(1000 * 1000 * 1000);
 
 pub(crate) const DONT_EVEN_BOTHER_RMS_THRESHOLD: f32 = 0.01;
+
+pub(crate) const ESPEAK_SAMPLES_PER_SECOND: usize = 22050;

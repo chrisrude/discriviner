@@ -2,6 +2,7 @@
     "cSpell.words": [
         "Blackman",
         "buflength",
+        "BUFSIZE",
         "curr",
         "Demux",
         "Demuxer",

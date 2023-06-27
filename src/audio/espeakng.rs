@@ -2,166 +2,143 @@
 
 use espeakng_sys::*;
 use lazy_static::lazy_static;
-use std::cell::Cell;
-use std::ffi::{c_void, CString};
-use std::os::raw::{c_char, c_int, c_short};
-use std::sync::{Mutex, MutexGuard};
+use songbird::constants::MONO_FRAME_SIZE;
+use std::ffi::{c_short, c_void, CString};
+use std::os::raw::c_int;
+use std::sync::Mutex;
+use tokio::sync::oneshot;
 
-/// The name of the voice to use
+use crate::model::constants::{DISCORD_SAMPLES_PER_SECOND, ESPEAK_SAMPLES_PER_SECOND};
+
+const BUFSIZE_MS: u64 = (1000 * MONO_FRAME_SIZE / DISCORD_SAMPLES_PER_SECOND) as u64;
+// const EE_OK: i32 = 0;
+const EE_INTERNAL_ERROR: i32 = -1;
 const VOICE_NAME: &str = "English";
-/// The length in mS of sound buffers passed to the SynthCallback function.
-const BUFF_LEN: i32 = 500;
-/// Options to set for espeak-ng
-const OPTIONS: i32 = 0;
+
+struct GenerationTask {
+    /// The audio data, so far
+    pub wav: Vec<i16>,
+    /// Wake us up when the audio is ready
+    pub tx: oneshot::Sender<Vec<i16>>,
+}
 
 lazy_static! {
-    /// The complete audio provided by the callback
-    static ref AUDIO_RETURN: Mutex<Cell<Vec<i16>>> = Mutex::new(Cell::new(Vec::default()));
-
-    /// Audio buffer for use in the callback
-    static ref AUDIO_BUFFER: Mutex<Cell<Vec<i16>>> = Mutex::new(Cell::new(Vec::default()));
+    static ref in_process_task_opt: Mutex<Option<GenerationTask>> = Mutex::new(None);
 }
-
-/// Spoken speech
-pub struct Spoken {
-    /// The audio data
-    pub wav: Vec<i16>,
-    /// The sample rate of the audio
-    pub sample_rate: i32,
-}
-
-/// Perform Text-To-Speech
-pub fn speak(text: &str) -> Spoken {
-    let output: espeak_AUDIO_OUTPUT = espeak_AUDIO_OUTPUT_AUDIO_OUTPUT_RETRIEVAL;
-
-    AUDIO_RETURN.plock().set(Vec::default());
-    AUDIO_BUFFER.plock().set(Vec::default());
-
-    // The directory which contains the espeak-ng-data directory, or NULL for the default location.
-    let path: *const c_char = std::ptr::null();
-    let voice_name_cstr = CString::new(VOICE_NAME).expect("Failed to convert &str to CString");
-    let voice_name = voice_name_cstr.as_ptr();
-
-    // Returns: sample rate in Hz, or -1 (EE_INTERNAL_ERROR).
-    let sample_rate = unsafe { espeak_Initialize(output, BUFF_LEN, path, OPTIONS) };
-
+pub fn init() -> i32 {
+    eprintln!(
+        "Initializing espeakng on thread {}",
+        std::thread::current().name().unwrap_or("unknown")
+    );
     unsafe {
-        espeak_SetVoiceByName(voice_name as *const c_char);
-        espeak_SetSynthCallback(Some(synth_callback))
-    }
-
-    let text_cstr = CString::new(text).expect("Failed to convert &str to CString");
-
-    let position = 0u32;
-    let position_type: espeak_POSITION_TYPE = 0;
-    let end_position = 0u32;
-    let flags = espeakCHARS_AUTO;
-    let identifier = std::ptr::null_mut();
-    let user_data = std::ptr::null_mut();
-
-    unsafe {
-        espeak_Synth(
-            text_cstr.as_ptr() as *const c_void,
-            BUFF_LEN as size_t,
-            position,
-            position_type,
-            end_position,
-            flags,
-            identifier,
-            user_data,
+        let sample_rate = espeak_Initialize(
+            // send data to our callback function, which will
+            // notify us when done.  We do this so that
+            // we don't block this thread while waiting for
+            // espeak-ng to finish.
+            espeak_AUDIO_OUTPUT_AUDIO_OUTPUT_RETRIEVAL,
+            // ms, not bytes!
+            BUFSIZE_MS as c_int,
+            // default directory for espeak-ng-data.  null
+            std::ptr::null(),
+            // dont exit(1) on error.  who tf would do that as a shard lib?
+            espeakINITIALIZE_DONT_EXIT as c_int,
         );
-    }
+        assert_ne!(EE_INTERNAL_ERROR, sample_rate);
+        assert_eq!(ESPEAK_SAMPLES_PER_SECOND as i32, sample_rate);
 
-    // Wait for the speaking to complete
-    match unsafe { espeak_Synchronize() } {
-        espeak_ERROR_EE_OK => {}
-        espeak_ERROR_EE_INTERNAL_ERROR => {
-            eprintln!("espeak-ng: Internal error");
-        }
-        _ => unreachable!(),
-    }
+        let cstr_voice = CString::new(VOICE_NAME).unwrap();
+        let result = espeak_SetVoiceByName(cstr_voice.as_ptr());
 
-    let result = AUDIO_RETURN.plock().take();
+        // this should be zero?
+        assert_eq!(2, result);
+        // assert_eq!(EE_OK, result);
 
-    Spoken {
-        wav: result,
-        sample_rate,
+        espeak_SetSynthCallback(Some(synth_callback));
+
+        // return our sample rate
+        sample_rate
     }
 }
 
-/// int SynthCallback(short *wav, int numsamples, espeak_EVENT *events);
-///
-/// wav:  is the speech sound data which has been produced.
-/// NULL indicates that the synthesis has been completed.
-///
-/// numsamples: is the number of entries in wav.  This number may vary, may be less than
-/// the value implied by the buflength parameter given in espeak_Initialize, and may
-/// sometimes be zero (which does NOT indicate end of synthesis).
-///
-/// events: an array of espeak_EVENT items which indicate word and sentence events, and
-/// also the occurrence if <mark> and <audio> elements within the text.  The list of
-/// events is terminated by an event of type = 0.
-///
-/// Callback returns: 0=continue synthesis,  1=abort synthesis.
 unsafe extern "C" fn synth_callback(
     wav: *mut c_short,
     sample_count: c_int,
-    events: *mut espeak_EVENT,
+    _events: *mut espeak_EVENT,
 ) -> c_int {
-    // Calculate the length of the events array
-    let mut events_copy = events;
-    let mut elem_count = 0;
-    while (*events_copy).type_ != espeak_EVENT_TYPE_espeakEVENT_LIST_TERMINATED {
-        elem_count += 1;
-        events_copy = events_copy.add(1);
-    }
+    eprintln!(
+        "synth_callback on thread {}",
+        std::thread::current().name().unwrap_or("unknown")
+    );
 
-    // Turn the event array into a Vec.
-    // We must clone from the slice, as the provided array's memory is managed by C
-    let event_slice = std::slice::from_raw_parts_mut(events, elem_count);
-    let event_vec = event_slice
-        .iter_mut()
-        .map(|f| *f)
-        .collect::<Vec<espeak_EVENT>>();
-
-    // Turn the audio wav data array into a Vec.
-    // We must clone from the slice, as the provided array's memory is managed by C
-    let wav_slice = std::slice::from_raw_parts_mut(wav, sample_count as usize);
-    let mut wav_vec = wav_slice.iter_mut().map(|f| *f).collect::<Vec<i16>>();
-
-    // Determine if this is the end of the synth
-    let mut is_end = false;
-    for event in event_vec {
-        if event
-            .type_
-            .eq(&espeak_EVENT_TYPE_espeakEVENT_MSG_TERMINATED)
-        {
-            is_end = true;
+    {
+        let mut task_opt = in_process_task_opt.lock().unwrap();
+        // it seems the callback can happen after we finish receiving
+        // audio, so if it's none just make sure we have no audio, then exit
+        if task_opt.is_none() {
+            if !wav.is_null() {
+                eprintln!("synth_callback: wav is not null, but task is none");
+            }
+            return 0;
         }
-    }
 
-    // If this is the end, we want to set the AUDIO_RETURN
-    // Else we want to append to the AUDIO_BUFFER
-    if is_end {
-        AUDIO_RETURN.plock().set(AUDIO_BUFFER.plock().take());
-    } else {
-        let mut curr_data = AUDIO_BUFFER.plock().take();
-        curr_data.append(&mut wav_vec);
-        AUDIO_BUFFER.plock().set(curr_data);
+        // when wav is zero, we are done
+        if wav.is_null() {
+            // we're done.  Remove the task from the mutex
+            // and send the audio over the response channel
+            let task = task_opt.take().unwrap();
+            task.tx.send(task.wav).unwrap();
+        } else {
+            let new_audio = std::slice::from_raw_parts(wav, sample_count as usize);
+            // add new_audio to the task's wav
+            task_opt
+                .as_mut()
+                .map(|task| task.wav.extend_from_slice(new_audio));
+        }
     }
 
     0
 }
 
-trait PoisonlessLock<T> {
-    fn plock(&self) -> MutexGuard<T>;
-}
+/// Perform Text-To-Speech
+pub async fn speak(text: &str) -> Vec<i16> {
+    eprintln!(
+        "speak on thread {}",
+        std::thread::current().name().unwrap_or("unknown")
+    );
 
-impl<T> PoisonlessLock<T> for Mutex<T> {
-    fn plock(&self) -> MutexGuard<T> {
-        match self.lock() {
-            Ok(l) => l,
-            Err(e) => e.into_inner(),
-        }
+    let (tx, rx) = oneshot::channel::<Vec<i16>>();
+
+    // there best not be another transcription in progress!
+    {
+        let mut opt_task = in_process_task_opt.lock().unwrap();
+
+        // if this fails, it means we either didn't clean up an earlier task,
+        // or more than one is running at the same time.
+        assert!(opt_task.is_none());
+
+        let new_task = GenerationTask {
+            wav: Vec::new(),
+            tx,
+        };
+        *opt_task = Some(new_task);
     }
+
+    let cstr_text = CString::new(text).unwrap();
+
+    unsafe {
+        let str_bytes = cstr_text.as_bytes_with_nul();
+        espeak_Synth(
+            str_bytes.as_ptr() as *const c_void,
+            str_bytes.len() as u64,
+            0,
+            espeak_POSITION_TYPE_POS_CHARACTER,
+            0,
+            espeakCHARS_AUTO,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        );
+    };
+
+    rx.await.unwrap()
 }
