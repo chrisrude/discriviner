@@ -29,10 +29,6 @@ fn init_resampler(resample_ratio: f64) -> SincFixedOut<f64> {
     let sinc_len = 128;
     let window = WindowFunction::Blackman2;
     let f_cutoff = calculate_cutoff(sinc_len, window);
-    // note: audio generated at 22050hz, Nyquist frequency is 11025hz
-    // so no need to go higher than that
-    eprintln!("f_cutoff: {}", f_cutoff);
-    eprintln!("mono frame size: {}", MONO_FRAME_SIZE);
 
     SincFixedOut::<f64>::new(
         resample_ratio,
