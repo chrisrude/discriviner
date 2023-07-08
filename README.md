@@ -7,6 +7,8 @@ A Discord audio bot that transcribes incoming audio using Whisper.cpp
 ### Download `discrivener-json` binary
 Currently there are binaries for 64-bit x86 Linux (kernel 3.2+, glibc 2.17+) as well as 64-bit Intel macOS (10.7+, Lion+).  You can [download them here](https://github.com/chrisrude/discriviner/releases/tag/v0.0.1).
 
+After downloading, be sure to mark them as executable: `chmod a+x discrivener-json-*`
+
 ### Download and extract espeak-ng-data.tar.gz
 
 [From the same page](https://github.com/chrisrude/discriviner/releases/tag/v0.0.1), download `espeak-ng-data.tar.gz` and extract it under `/usr/local/share`.  You should wind up with a `/usr/local/share/espeak-ng-data` with a bunch of `*_data` files in it.
