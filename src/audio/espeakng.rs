@@ -115,7 +115,7 @@ pub async fn speak(text: &str) -> Vec<i16> {
         let str_bytes = cstr_text.as_bytes_with_nul();
         espeak_Synth(
             str_bytes.as_ptr() as *const c_void,
-            str_bytes.len() as u64,
+            str_bytes.len(),
             0,
             espeak_POSITION_TYPE_POS_CHARACTER,
             0,

@@ -20,6 +20,7 @@ version = "1.4.0"
 
 [dependencies.espeakng-sys]
 git = "https://github.com/Better-Player/espeakng-sys/"
+rev = "b71489be4419449cee48fbff20ab4d7dd913ab65"
 features = ["clang-runtime"]
 
 [dependencies.futures]

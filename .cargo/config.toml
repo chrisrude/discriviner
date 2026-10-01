@@ -1,0 +1,5 @@
+[env]
+# Two packages, `audiopus_sys-0.2.2` and `whisper-rs-sys-0.6.1`, build
+# bundled C libraries whose CMakeLists.txt require compatibility with
+# CMake < 3.5, which CMake 4 removed.  Setting this lets them configure.
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"

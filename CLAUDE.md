@@ -16,31 +16,50 @@ talk to the Discord gateway itself: the caller obtains the voice connection
 details (endpoint, session id, voice token) some other way and passes them in.
 
 - Crate version `0.2.0`, MIT license, edition 2021.
-- Last substantive commit: 2023-06-27. Dependencies are pinned to mid-2023
-  versions in `Cargo.lock` (songbird 0.3.2, whisper-rs 0.8.0, tokio 1.28).
+- Last substantive code commit: 2023-06-27. Dependencies are pinned to
+  mid-2023 versions in `Cargo.lock` (songbird 0.3.2, whisper-rs 0.8.0,
+  tokio 1.28), except for the build-only changes described under "Build and
+  run" (2026-10-01) that were needed to compile with a 2026 toolchain.
 - `.gitignore` excludes `target/` and `ggml-*.bin` (models live in the repo
   root during development).
 
 ## Build and run
 
-Native build prerequisites (none of the pure-Rust deps are the hard part):
+See `CONTRIBUTING.md` for the step-by-step setup. Native build prerequisites
+(none of the pure-Rust deps are the hard part):
 
 | Need | Why |
 |------|-----|
+| Rust >= 1.85 | `espeakng-sys` 0.3.0 uses edition 2024; `Cargo.lock` is format v4 |
 | `cmake` | `audiopus_sys` builds libopus from source; `whisper-rs-sys` builds whisper.cpp |
-| `clang` + `libclang` | `espeakng-sys` uses bindgen (`clang-runtime` feature) and compiles espeak-ng |
-| C/C++ toolchain | all of the above |
-| `espeak-ng-data` at runtime | `espeak_Initialize` is called with a null data path, so it uses the compiled-in default (`/usr/local/share/espeak-ng-data`). The README's release tarball provides this. |
+| `clang` (provides `libclang`) | bindgen in `espeakng-sys` (`clang-runtime` feature, loads libclang at build time) and `whisper-rs-sys` |
+| C/C++ toolchain (`build-essential`) | all of the above |
+| `libespeak-ng-dev` | `espeakng-sys` does **not** build espeak-ng; it ships its own headers and links the system `libespeak-ng`. Without it, the library compiles but the examples and `cargo test` fail to link (`unable to find library -lespeak-ng`). |
+| `espeak-ng-data` at runtime | installed as a dependency of `libespeak-ng-dev`. `espeak_Initialize` is called with a null data path, so it uses the library's compiled-in default; for Ubuntu's package that is `/usr/lib/x86_64-linux-gnu/espeak-ng-data`. |
 | a ggml Whisper model file | passed as the first positional argument to both examples |
 
-On the WSL2 dev machine used for the 2026-09-26 review, `cmake`, `clang`,
-`pkg-config` and `espeak-ng` were all absent and `cargo check --examples`
-failed in the `audiopus_sys` build script. Install them before expecting
-anything to compile:
-
 ```bash
-sudo apt-get install cmake clang libclang-dev pkg-config build-essential
+sudo apt install build-essential clang cmake libespeak-ng-dev
 ```
+
+Workarounds already in the repo for building old dependencies with a 2026
+toolchain (CMake 4.2, clang 21, rustc 1.98, Ubuntu 26.04 under WSL2):
+
+- `.cargo/config.toml` sets `CMAKE_POLICY_VERSION_MINIMUM=3.5` in the build
+  environment. CMake 4 refuses the `cmake_minimum_required` versions used by
+  the bundled opus (`audiopus_sys` 0.2.2) and whisper.cpp (`whisper-rs-sys`
+  0.6.1) without it. Do not patch crates under `~/.cargo/registry` instead.
+- `espeakng-sys` is pinned by git `rev` to `b71489b`, the last commit of the
+  now-archived upstream repo (version 0.3.0). The previously locked commit
+  used bindgen 0.59, which panics with clang 16+ (`"..._(unnamed_at_/usr/include/...)"
+  is not a valid Ident`). The upstream changes between the two commits are
+  only the bindgen bump and the edition; the headers are unchanged.
+- bindgen 0.71 needs `proc-macro2` >= 1.0.80 but doesn't declare it, so the
+  lockfile is bumped to 1.0.80 by hand. If it regresses, the build fails with
+  `no associated function ... c_string`; fix with
+  `cargo update -p proc-macro2 --precise 1.0.80`.
+- Newer bindgen maps `size_t` to `usize`, which is why `espeak_Synth` in
+  `src/audio/espeakng.rs` takes `str_bytes.len()` with no cast.
 
 Commands:
 
@@ -178,8 +197,10 @@ discards the segment) and by token count.
 - There are no integration tests and nothing exercises whisper or espeak-ng
   under `cargo test`. Verifying transcription changes means running an example
   against a real voice channel or building the replay harness first.
-- CI (`.github/workflows/rust.yml`) runs `cargo build --examples` and
-  `cargo test` on `ubuntu-latest`; the clippy workflow uses deprecated
+- CI (`.github/workflows/rust.yml`) installs `libespeak-ng-dev`, then runs
+  `cargo build --examples` and `cargo test` on `ubuntu-latest`. The runner
+  image supplies cmake, clang and the Rust toolchain, so it is not testing
+  the exact 2026 toolchain described above. The clippy workflow uses deprecated
   actions (`actions-rs`, `upload-sarif@v1`) and is marked `continue-on-error`.
 
 ## Conventions observed in the code
@@ -195,6 +216,8 @@ discards the segment) and by token count.
 - Comments frequently say "ssid" where the code means SSRC.
 - Formatting is rustfmt default; clippy was last run clean in June 2023 and
   the current toolchain (1.98) will have new lints.
+- Build-time workarounds go in repo-level config (`.cargo/config.toml`,
+  `Cargo.toml` pins, `Cargo.lock`), never in patched copies of crate sources.
 
 ## Things that will bite you when upgrading dependencies
 
