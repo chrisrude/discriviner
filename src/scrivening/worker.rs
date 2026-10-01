@@ -354,3 +354,94 @@ fn is_valid_segment(segment: &TextSegment) -> bool {
     }
     true
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn segment_with_probabilities(probabilities: &[u32]) -> TextSegment {
+        TextSegment {
+            tokens_with_probability: probabilities
+                .iter()
+                .map(|p| TokenWithProbability {
+                    p: *p,
+                    token_id: 0,
+                    token_text: "x".to_string(),
+                })
+                .collect(),
+            start_offset_ms: 0,
+            end_offset_ms: 1000,
+        }
+    }
+
+    #[test]
+    fn test_valid_segment_mostly_high_probability() {
+        assert!(is_valid_segment(&segment_with_probabilities(&[
+            90, 80, 70, 10
+        ])));
+    }
+
+    #[test]
+    fn test_invalid_segment_mostly_low_probability() {
+        assert!(!is_valid_segment(&segment_with_probabilities(&[
+            90, 40, 30, 20
+        ])));
+    }
+
+    #[test]
+    fn test_valid_segment_tie_is_kept() {
+        assert!(is_valid_segment(&segment_with_probabilities(&[90, 20])));
+    }
+
+    #[test]
+    fn test_probability_50_counts_as_low() {
+        assert!(!is_valid_segment(&segment_with_probabilities(&[
+            50, 50, 51
+        ])));
+        assert!(is_valid_segment(&segment_with_probabilities(&[50, 51, 51])));
+    }
+
+    #[test]
+    fn test_invalid_segment_too_many_tokens() {
+        let just_under = vec![99; OUTRAGEOUSLY_MANY_TOKENS - 1];
+        let too_many = vec![99; OUTRAGEOUSLY_MANY_TOKENS];
+        assert!(is_valid_segment(&segment_with_probabilities(&just_under)));
+        assert!(!is_valid_segment(&segment_with_probabilities(&too_many)));
+    }
+
+    #[test]
+    fn test_probability_histogram_single_bucket() {
+        assert_eq!(
+            probability_histogram(&segment_with_probabilities(&[95; 10])),
+            "[▯▯▯▯▯▯▯▯▯█] (10 tokens)"
+        );
+    }
+
+    #[test]
+    fn test_probability_histogram_100_goes_in_top_bucket() {
+        assert_eq!(
+            probability_histogram(&segment_with_probabilities(&[100, 0])),
+            "[▒▯▯▯▯▯▯▯▯▒] (2 tokens)"
+        );
+    }
+
+    #[test]
+    fn test_probability_histogram_spread() {
+        // 1 of 4 tokens -> (1 * 3) / 4 + 1 = 1, 3 of 4 -> (3 * 3) / 4 + 1 = 3
+        assert_eq!(
+            probability_histogram(&segment_with_probabilities(&[5, 55, 55, 55])),
+            "[░▯▯▯▯▓▯▯▯▯] (4 tokens)"
+        );
+    }
+
+    #[test]
+    fn test_bounded_token_buffer_keeps_most_recent() {
+        let mut buffer = BoundedTokenBuffer::new();
+        let tokens: Vec<WhisperToken> = (0..(TOKENS_TO_KEEP as i32 + 10)).collect();
+        buffer.add_all(&tokens);
+        let kept = buffer.get();
+        assert_eq!(kept.len(), TOKENS_TO_KEEP);
+        assert_eq!(kept[0], 10);
+        assert_eq!(*kept.last().unwrap(), TOKENS_TO_KEEP as i32 + 9);
+    }
+}

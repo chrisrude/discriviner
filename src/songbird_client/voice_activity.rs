@@ -218,7 +218,7 @@ mod tests {
 
     use super::*;
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_voice_activity() {
         let shutdown_token = CancellationToken::new();
         let (tx, rx) = sync::mpsc::unbounded_channel();
@@ -327,7 +327,7 @@ mod tests {
         voice_activity.await.unwrap();
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_voice_activity_with_interruption() {
         let shutdown_token = CancellationToken::new();
         let (tx, rx) = sync::mpsc::unbounded_channel();
@@ -465,7 +465,7 @@ mod tests {
         voice_activity.await.unwrap();
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_shutdown_on_token() {
         let shutdown_token = CancellationToken::new();
         let (_tx, rx) = sync::mpsc::unbounded_channel();
@@ -485,6 +485,73 @@ mod tests {
             .is_err_and(|x| TryRecvError::Empty.eq(&x)));
 
         println!("sending shutdown token 2");
+        shutdown_token.cancel();
+        voice_activity.await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    #[ignore = "known bug: idle deadlines are kept in a max-heap, so the latest deadline fires first and earlier ones wait for it"]
+    async fn test_idle_events_fire_in_deadline_order() {
+        let shutdown_token = CancellationToken::new();
+        let (tx, rx) = sync::mpsc::unbounded_channel();
+        let (tx_silent_channel, _rx_silent_channel) = sync::mpsc::unbounded_channel();
+        let (tx_silent_user, mut rx_silent_user) = sync::mpsc::unbounded_channel();
+        let voice_activity = VoiceActivity::monitor(
+            rx,
+            shutdown_token.clone(),
+            tx_silent_channel,
+            tx_silent_user,
+            Duration::from_millis(10),
+        );
+
+        // user 1 goes silent at t=0 (idle due at t=10),
+        // user 2 goes silent at t=5 (idle due at t=15)
+        tx.send(UserAudioEvent {
+            user_id: 1,
+            event_type: UserAudioEventType::Silent,
+        })
+        .unwrap();
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        tx.send(UserAudioEvent {
+            user_id: 2,
+            event_type: UserAudioEventType::Silent,
+        })
+        .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(6)).await;
+
+        // at t=11, user 1 is idle and user 2 is not
+        let mut events = vec![];
+        while let Ok(event) = rx_silent_user.try_recv() {
+            events.push(event);
+        }
+        assert_eq!(
+            events,
+            vec![
+                UserAudioEvent {
+                    user_id: 1,
+                    event_type: UserAudioEventType::Silent
+                },
+                UserAudioEvent {
+                    user_id: 2,
+                    event_type: UserAudioEventType::Silent
+                },
+                UserAudioEvent {
+                    user_id: 1,
+                    event_type: UserAudioEventType::Idle
+                },
+            ]
+        );
+
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        assert_eq!(
+            rx_silent_user.try_recv(),
+            Ok(UserAudioEvent {
+                user_id: 2,
+                event_type: UserAudioEventType::Idle
+            })
+        );
+
         shutdown_token.cancel();
         voice_activity.await.unwrap();
     }

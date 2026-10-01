@@ -5,6 +5,7 @@ use crate::{audio::events::UserAudioEventType, model::types::Transcription};
 /// Determines when to start a new transcript generation,
 /// and when to consider a segment from a transcript complete.
 
+#[derive(Debug, PartialEq)]
 pub(crate) enum WorkerActions {
     /// Requests that a new transcript be generated
     /// at the given point in the future.  This will replace

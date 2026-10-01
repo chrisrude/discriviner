@@ -75,5 +75,10 @@ version = "0.8.0"
 version = "4.3.2"
 features = ["derive"]
 
+# paused-clock tests (tokio::time::pause / advance)
+[dev-dependencies.tokio]
+version = "1.28.2"
+features = ["test-util"]
+
 [dev-dependencies.discrivener]
 path = "./"

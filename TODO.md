@@ -4,6 +4,40 @@ Improvement backlog from the 2026-09-26 code review. Ordered roughly by
 severity within each section. Items marked **[voice]** are covered in more
 detail in `VOICE-UPDATES.md`.
 
+## Work order
+
+The sequence agreed on 2026-10-01. Each step references the backlog items
+below. Tests come before the songbird migration so the migration has
+something to verify against, and they target the layers below songbird
+(`VoiceActivity` / `UserAudioManager` and down) so they survive it.
+
+1. **Live connection check** — *pending (needs setup)*. Run
+   `discrivener-json` against a real voice channel and confirm it joins,
+   transcribes and speaks. songbird 0.3.2 predates Discord's DAVE E2EE; if
+   the old driver can no longer connect, step 6 becomes urgent and moves
+   ahead of steps 4-5.
+2. **Pure unit tests** — *done 2026-10-01*: `FiveSecondStrategy`,
+   `split_at_end_time` edge cases, `is_valid_segment` /
+   `probability_histogram`, `BoundedTokenBuffer`, `resample`, and
+   paused-time `voice_activity` tests. (5.2, 5.3, 5.4.) Tests that reproduce
+   known bugs are `#[ignore = "known bug: ..."]`; list them with
+   `cargo test -- --ignored`. Surfaced 1.6, 1.13, 1.14 and question 1.15.
+3. **Small correctness fixes**, each with a regression test where
+   practical: 1.1 (use-after-free `Bytes`), 1.2 (stdin EOF busy-loop), 1.6,
+   1.9, 1.13, 1.14 (un-ignore their tests), then the rest of section 1 that
+   doesn't depend on songbird.
+4. **Transcriber seam**: a trait over whisper so tests can inject a stub.
+5. **Replay harness** (5.1): convert `tests/test.json` into a
+   songbird-neutral fixture (speaking events + timestamped per-user PCM) and
+   assert on emitted `VoiceChannelEvent`s with the stub transcriber; one
+   ignored-by-default test against real whisper.
+6. **songbird 0.3.2 -> 0.6** (3.1), verified with the replay harness and the
+   live connection check.
+7. **whisper-rs 0.8 -> 0.16** (3.2), then remaining bumps and cleanup
+   (3.3-3.6).
+8. Voice stack modernization per `VOICE-UPDATES.md` (section 2 items,
+   sherpa-onnx STT/TTS).
+
 ## 1. Correctness and memory safety
 
 1. **Use-after-free via non-copying `Bytes::from`** in
@@ -64,6 +98,30 @@ detail in `VOICE-UPDATES.md`.
 12. **`Whisper::load` runs on the async runtime and panics** on a missing
     file. Return `Result` and load in `spawn_blocking` (model load takes
     seconds for larger models). **[voice]**
+
+13. **Idle events fire latest-deadline-first.** `UserIdleDetector` keeps
+    deadlines in a `BinaryHeap`, which is a max-heap, and `UserTime` orders
+    by `idle_timeout` ascending, so `peek()` returns the *latest* deadline.
+    When two users go silent within `USER_SILENCE_TIMEOUT` of each other, the
+    first user's `Idle` is delayed until the second user's deadline. Wrap in
+    `std::cmp::Reverse` (or invert `Ord`). Test:
+    `test_idle_events_fire_in_deadline_order`.
+14. **`resample` sometimes adds an extra 20 ms frame of silence.**
+    `calc_output_frames` multiplies by a float ratio and `ceil`s, so e.g.
+    11025 samples at 22050 Hz -> 48 kHz gives 24000.000000000004 -> 24001 ->
+    rounded up to 24960 instead of 24000. Compute with integer math
+    (`(len * to).div_ceil(from)`). Test:
+    `test_resample_output_length_exact_frames`.
+15. **Question: tentative transcripts are rarely kept.**
+    `FiveSecondStrategy::handle_transcription` stores the held-back tail only
+    when `context.audio_duration == tentative_transcript.audio_duration`,
+    which is true only when *nothing* was finalized from that transcript.
+    The `Idle` handler compares the post-discard buffer duration to the
+    tentative duration, which suggests the store condition was meant to be
+    `context.audio_duration == transcript.audio_duration` ("no new audio
+    since this transcript was requested"). Current behavior is pinned by
+    `test_no_tentative_transcript_when_part_was_finalized`; decide intent
+    before changing it.
 
 ## 2. Transcription quality and performance **[voice]**
 

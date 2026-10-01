@@ -122,9 +122,16 @@ a prose description of the five-second strategy. The short version:
 
 ## Testing
 
-- Unit tests exist in `audio_buffer.rs` (timestamp placement, discard, silence
-  detection), `voice_activity.rs` (state machine, uses real sleeps) and
-  `types.rs` (`split_at_end_time`). Run with `cargo test`.
+- Unit tests live in `#[cfg(test)] mod tests` at the bottom of each file:
+  `audio_buffer.rs` (timestamp placement, discard, silence detection),
+  `voice_activity.rs` (state machine, paused tokio clock via the
+  `test-util` dev-feature), `types.rs` (`split_at_end_time`),
+  `five_second_strategy.rs`, `worker.rs` (segment filtering, histogram,
+  token buffer) and `resample.rs`. Run with `cargo test`.
+- Tests that reproduce a known, not-yet-fixed bug are marked
+  `#[ignore = "known bug: ..."]` so the suite stays green. `cargo test --
+  --ignored` lists them (they should all fail); when fixing the bug, remove
+  the `ignore`.
 - `tests/test.json` is 1.1 MB of captured songbird events (SpeakingStateUpdate,
   SpeakingUpdate, VoicePacket with decoded audio). Nothing reads it today; it
   is the natural fixture for a replay harness (see `TODO.md`).
@@ -150,6 +157,10 @@ a prose description of the five-second strategy. The short version:
 - Comments frequently say "ssid" where the code means SSRC.
 - Formatting is rustfmt default; clippy was last run clean in June 2023 and
   the current toolchain (1.98) will have new lints.
+- **No references to `.md` files in code** (source, comments, build
+  scripts, config). The code must stand on its own: put the explanation in
+  the comment itself rather than pointing at `TODO.md`, `docs/`, etc. The
+  docs may reference code, not the other way around.
 - Build-time workarounds go in repo-level config (`.cargo/config.toml`,
   `Cargo.toml` pins, `Cargo.lock`), never in patched copies of crate sources.
 

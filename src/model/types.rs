@@ -406,4 +406,135 @@ mod tests {
         );
         assert_eq!(second_segments[0].start_offset_ms, 0)
     }
+
+    fn segment(text: &str, start_offset_ms: u32, end_offset_ms: u32) -> TextSegment {
+        TextSegment {
+            tokens_with_probability: vec![TokenWithProbability {
+                token_id: 0,
+                token_text: text.to_string(),
+                p: 90,
+            }],
+            start_offset_ms,
+            end_offset_ms,
+        }
+    }
+
+    fn transcription(segments: Vec<TextSegment>, audio_duration_ms: u64) -> Transcription {
+        Transcription {
+            segments,
+            start_timestamp: SystemTime::UNIX_EPOCH,
+            user_id: 7,
+            audio_duration: Duration::from_millis(audio_duration_ms),
+            processing_time: Duration::from_millis(100),
+        }
+    }
+
+    fn at_ms(ms: u64) -> SystemTime {
+        SystemTime::UNIX_EPOCH + Duration::from_millis(ms)
+    }
+
+    #[test]
+    fn test_split_preserves_metadata_and_total_duration() {
+        let message = transcription(vec![segment("a", 0, 1000), segment("b", 1000, 2500)], 3000);
+        let (first, second) = Transcription::split_at_end_time(&message, at_ms(1500));
+
+        assert_eq!(first.user_id, 7);
+        assert_eq!(second.user_id, 7);
+        assert_eq!(first.start_timestamp, message.start_timestamp);
+        assert_eq!(first.processing_time, message.processing_time);
+        assert_eq!(first.audio_duration, Duration::from_millis(1000));
+        assert_eq!(second.audio_duration, Duration::from_millis(2000));
+        assert_eq!(
+            first.audio_duration + second.audio_duration,
+            message.audio_duration
+        );
+        assert_eq!(second.start_timestamp, at_ms(1000));
+        assert_eq!(second.segments, vec![segment("b", 0, 1500)]);
+    }
+
+    #[test]
+    fn test_split_segment_ending_exactly_at_end_time_goes_first() {
+        let message = transcription(vec![segment("a", 0, 1000), segment("b", 1000, 2000)], 2000);
+        let (first, second) = Transcription::split_at_end_time(&message, at_ms(1000));
+        assert_eq!(first.segments.len(), 1);
+        assert_eq!(second.segments.len(), 1);
+    }
+
+    #[test]
+    fn test_split_everything_before_end_time() {
+        let message = transcription(vec![segment("a", 0, 1000), segment("b", 1000, 2000)], 3000);
+        let (first, second) = Transcription::split_at_end_time(&message, at_ms(5000));
+        assert_eq!(first.segments.len(), 2);
+        assert!(second.is_empty());
+        // the first half only claims the audio its segments cover
+        assert_eq!(first.audio_duration, Duration::from_millis(2000));
+        assert_eq!(second.audio_duration, Duration::from_millis(1000));
+    }
+
+    #[test]
+    fn test_split_no_segments() {
+        let message = transcription(vec![], 3000);
+        let (first, second) = Transcription::split_at_end_time(&message, at_ms(1000));
+        assert!(first.is_empty());
+        assert!(second.is_empty());
+        assert_eq!(first.audio_duration, Duration::from_millis(1000));
+        assert_eq!(second.audio_duration, Duration::from_millis(2000));
+    }
+
+    #[test]
+    fn test_split_no_segments_end_time_past_audio() {
+        let message = transcription(vec![], 3000);
+        let (first, second) = Transcription::split_at_end_time(&message, at_ms(9000));
+        assert_eq!(first.audio_duration, Duration::from_millis(3000));
+        assert_eq!(second.audio_duration, Duration::ZERO);
+    }
+
+    #[test]
+    fn test_split_end_time_before_start_is_clamped() {
+        let mut message = transcription(vec![segment("a", 0, 1000)], 2000);
+        message.start_timestamp = at_ms(10_000);
+        let (first, second) = Transcription::split_at_end_time(&message, at_ms(5000));
+        assert!(first.is_empty());
+        assert_eq!(first.audio_duration, Duration::ZERO);
+        assert_eq!(second.segments.len(), 1);
+        assert_eq!(second.audio_duration, Duration::from_millis(2000));
+    }
+
+    #[test]
+    fn test_split_first_half_empty_cuts_at_earliest_second_segment_start() {
+        // nothing ends before 1500, but "b" starts at 500, so the first half
+        // should claim the leading 500 ms of (presumably) silence
+        let message = transcription(vec![segment("b", 500, 2000)], 2000);
+        let (first, second) = Transcription::split_at_end_time(&message, at_ms(1500));
+        assert!(first.is_empty());
+        assert_eq!(first.audio_duration, Duration::from_millis(500));
+        assert_eq!(second.audio_duration, Duration::from_millis(1500));
+        assert_eq!(second.segments, vec![segment("b", 0, 1500)]);
+    }
+
+    #[test]
+    #[ignore = "known bug: panics on unwrap() of an empty min() when every segment starts after end_time"]
+    fn test_split_first_half_empty_all_segments_start_after_end_time() {
+        // a segment that begins in the last moments of the buffer, after
+        // the requested split point
+        let message = transcription(vec![segment("late", 1900, 2000)], 2000);
+        let (first, second) = Transcription::split_at_end_time(&message, at_ms(1750));
+        assert!(first.is_empty());
+        assert_eq!(second.segments.len(), 1);
+        assert_eq!(
+            first.audio_duration + second.audio_duration,
+            message.audio_duration
+        );
+    }
+
+    #[test]
+    #[ignore = "known bug: u32 underflow when a second-half segment starts before the first half ends"]
+    fn test_split_overlapping_segments() {
+        // whisper can return segments whose timestamps overlap
+        let message = transcription(vec![segment("a", 0, 1000), segment("b", 900, 2000)], 2000);
+        let (first, second) = Transcription::split_at_end_time(&message, at_ms(1500));
+        assert_eq!(first.segments.len(), 1);
+        assert_eq!(second.segments.len(), 1);
+        assert_eq!(second.segments[0].end_offset_ms, 1000);
+    }
 }

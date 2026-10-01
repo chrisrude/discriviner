@@ -135,3 +135,221 @@ impl TranscriptStrategy for FiveSecondStrategy {
         ])
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::SystemTime;
+
+    use crate::model::types::{TextSegment, TokenWithProbability};
+
+    use super::*;
+
+    fn ms(ms: u64) -> Duration {
+        Duration::from_millis(ms)
+    }
+
+    fn segment(start_offset_ms: u32, end_offset_ms: u32) -> TextSegment {
+        TextSegment {
+            tokens_with_probability: vec![TokenWithProbability {
+                token_id: 0,
+                token_text: "word".to_string(),
+                p: 90,
+            }],
+            start_offset_ms,
+            end_offset_ms,
+        }
+    }
+
+    fn transcription(segments: Vec<TextSegment>, audio_duration: Duration) -> Transcription {
+        Transcription {
+            segments,
+            start_timestamp: SystemTime::UNIX_EPOCH,
+            user_id: 1,
+            audio_duration,
+            processing_time: ms(100),
+        }
+    }
+
+    fn context(audio_duration: Duration, silent_after: bool) -> WorkerContext {
+        WorkerContext {
+            audio_duration,
+            silent_after,
+        }
+    }
+
+    #[test]
+    fn test_next_transcript_time_before_first_period() {
+        let strategy = FiveSecondStrategy::new();
+        assert_eq!(strategy.get_next_transcript_time(&ms(0)), ms(5000));
+        assert_eq!(strategy.get_next_transcript_time(&ms(3000)), ms(2000));
+        assert_eq!(strategy.get_next_transcript_time(&ms(4999)), ms(1));
+    }
+
+    #[test]
+    fn test_next_transcript_time_after_first_period() {
+        let strategy = FiveSecondStrategy::new();
+        // on a period boundary, wait a full period
+        assert_eq!(strategy.get_next_transcript_time(&ms(5000)), ms(1000));
+        assert_eq!(strategy.get_next_transcript_time(&ms(7000)), ms(1000));
+        // otherwise, wait until the next boundary
+        assert_eq!(strategy.get_next_transcript_time(&ms(5300)), ms(700));
+        assert_eq!(strategy.get_next_transcript_time(&ms(12_999)), ms(1));
+    }
+
+    #[test]
+    fn test_speaking_schedules_next_transcript() {
+        let mut strategy = FiveSecondStrategy::new();
+        assert_eq!(
+            strategy.handle_event(&UserAudioEventType::Speaking, &ms(2000)),
+            Some(vec![WorkerActions::NewTranscript(Some(ms(3000)))])
+        );
+        assert_eq!(
+            strategy.handle_event(&UserAudioEventType::Speaking, &ms(6400)),
+            Some(vec![WorkerActions::NewTranscript(Some(ms(600)))])
+        );
+    }
+
+    #[test]
+    fn test_silent_requests_transcript_immediately() {
+        let mut strategy = FiveSecondStrategy::new();
+        assert_eq!(
+            strategy.handle_event(&UserAudioEventType::Silent, &ms(2000)),
+            Some(vec![WorkerActions::NewTranscript(Some(Duration::ZERO))])
+        );
+    }
+
+    #[test]
+    fn test_idle_without_tentative_transcript_does_nothing() {
+        let mut strategy = FiveSecondStrategy::new();
+        assert_eq!(
+            strategy.handle_event(&UserAudioEventType::Idle, &ms(2000)),
+            None
+        );
+    }
+
+    #[test]
+    fn test_transcription_followed_by_silence_is_published_whole() {
+        let mut strategy = FiveSecondStrategy::new();
+        let transcript = transcription(vec![segment(0, 1000), segment(1000, 2900)], ms(3000));
+        assert_eq!(
+            strategy.handle_transcription(&transcript, context(ms(3000), true)),
+            Some(vec![
+                WorkerActions::Publish(transcript.clone()),
+                WorkerActions::NewTranscript(Some(FIRST_TRANSCRIPT_PERIOD)),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_transcription_published_whole_when_buffer_two_thirds_full() {
+        let mut strategy = FiveSecondStrategy::new();
+        let transcript = transcription(vec![segment(0, 19_900)], ms(20_000));
+        let buffer_duration = 2 * AUDIO_TO_RECORD / 3;
+        assert_eq!(
+            strategy.handle_transcription(&transcript, context(buffer_duration, false)),
+            Some(vec![
+                WorkerActions::Publish(transcript.clone()),
+                WorkerActions::NewTranscript(Some(FIRST_TRANSCRIPT_PERIOD)),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_transcription_while_speaking_finalizes_all_but_the_tail() {
+        let mut strategy = FiveSecondStrategy::new();
+        // the last USER_SILENCE_TIMEOUT of audio may be cut off mid-word,
+        // so segments that end in it are held back
+        let transcript = transcription(vec![segment(0, 1000), segment(1000, 2900)], ms(3000));
+        let actions = strategy
+            .handle_transcription(&transcript, context(ms(3000), false))
+            .unwrap();
+
+        let mut finalized = transcription(vec![segment(0, 1000)], ms(1000));
+        finalized.processing_time = transcript.processing_time;
+        assert_eq!(
+            actions,
+            vec![
+                WorkerActions::Publish(finalized),
+                // 2000 ms remain, so the next transcript is due at the 5 s mark
+                WorkerActions::NewTranscript(Some(ms(3000))),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tentative_transcript_published_on_idle_if_no_new_audio() {
+        let mut strategy = FiveSecondStrategy::new();
+        // nothing ends before the tail, so nothing is finalized and the
+        // whole transcript is held as tentative
+        let transcript = transcription(vec![segment(0, 2900)], ms(3000));
+        let actions = strategy
+            .handle_transcription(&transcript, context(ms(3000), false))
+            .unwrap();
+        assert!(matches!(&actions[0], WorkerActions::Publish(t) if t.is_empty()));
+
+        // the user goes idle and the buffer hasn't grown: publish as-is
+        match strategy
+            .handle_event(&UserAudioEventType::Idle, &ms(3000))
+            .as_deref()
+        {
+            Some([WorkerActions::Publish(t)]) => {
+                assert_eq!(t.segments.len(), 1);
+                assert_eq!(t.audio_duration, ms(3000));
+            }
+            other => panic!("expected the tentative transcript, got {:?}", other),
+        }
+
+        // it is only published once
+        assert_eq!(
+            strategy.handle_event(&UserAudioEventType::Idle, &ms(3000)),
+            None
+        );
+    }
+
+    #[test]
+    fn test_tentative_transcript_discarded_if_audio_arrived() {
+        let mut strategy = FiveSecondStrategy::new();
+        let transcript = transcription(vec![segment(0, 2900)], ms(3000));
+        strategy.handle_transcription(&transcript, context(ms(3000), false));
+
+        // more audio came in after the transcript was requested, so the
+        // tentative transcript is stale
+        assert_eq!(
+            strategy.handle_event(&UserAudioEventType::Idle, &ms(3500)),
+            None
+        );
+        // and it doesn't come back once the durations happen to match
+        assert_eq!(
+            strategy.handle_event(&UserAudioEventType::Idle, &ms(3000)),
+            None
+        );
+    }
+
+    #[test]
+    fn test_new_transcription_replaces_tentative_transcript() {
+        let mut strategy = FiveSecondStrategy::new();
+        let transcript = transcription(vec![segment(0, 2900)], ms(3000));
+        strategy.handle_transcription(&transcript, context(ms(3000), false));
+        strategy.handle_transcription(&transcript, context(ms(3000), true));
+        assert_eq!(
+            strategy.handle_event(&UserAudioEventType::Idle, &ms(3000)),
+            None
+        );
+    }
+
+    #[test]
+    fn test_no_tentative_transcript_when_part_was_finalized() {
+        // Current behavior: a tentative transcript is kept only when its
+        // duration equals the whole buffer, i.e. when nothing was finalized.
+        // After a partial finalize, the tail is never published from Idle
+        // and has to wait for the next whisper run.
+        let mut strategy = FiveSecondStrategy::new();
+        let transcript = transcription(vec![segment(0, 1000), segment(1000, 2900)], ms(3000));
+        strategy.handle_transcription(&transcript, context(ms(3000), false));
+        // after publishing the finalized 1000 ms, the buffer holds 2000 ms
+        assert_eq!(
+            strategy.handle_event(&UserAudioEventType::Idle, &ms(2000)),
+            None
+        );
+    }
+}
