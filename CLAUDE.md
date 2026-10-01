@@ -1,9 +1,10 @@
 # CLAUDE.md
 
 Working notes for anyone (human or AI) doing future work on this repository.
-Companion documents: `TODO.md` (prioritized improvement backlog from the
-2026-09-26 code review) and `VOICE-UPDATES.md` (plan for modernizing the
-speech-to-text and text-to-speech stack).
+Companion documents: `docs/ARCHITECTURE.md` (data flow, key types, timing
+constants, transcription strategy), `TODO.md` (prioritized improvement
+backlog from the 2026-09-26 code review) and `docs/VOICE-UPDATES.md` (plan for
+modernizing the speech-to-text and text-to-speech stack).
 
 ## What this is
 
@@ -70,99 +71,32 @@ cargo clippy --all-features
 cargo run --example discrivener-json -- <model.bin> -c <channel_id> -e <endpoint> -g <guild_id> -s <session_id> -u <user_id> -v <voice_token>
 ```
 
-`discrivener-json` is the binary oobabot runs. Its contract:
-
-- **stdout**: one JSON object per line, one per `VoiceChannelEvent`.
-- **stdin**: one line per message to speak aloud in the channel.
-- **stderr**: free-form debug logging (`eprintln!` everywhere; there is no
-  `log`/`tracing` integration).
-- Exits on Ctrl-C.
-
-`discrivener-cli` is a human-readable variant of the same thing and does not
-support speaking.
+`discrivener-json` is the binary oobabot runs: one JSON `VoiceChannelEvent`
+per line on stdout, one line of text to speak per line on stdin, debug
+logging on stderr. `discrivener-cli` is a human-readable variant without
+speaking. Full contract in `docs/ARCHITECTURE.md`.
 
 ## Architecture
 
-Everything is tokio tasks connected by unbounded mpsc channels and shut down
-by a single shared `CancellationToken`. `src/lib.rs` (`Discrivener::load`)
-wires it together; read that function first.
+Read `docs/ARCHITECTURE.md` before changing anything in the audio or
+transcription path. It has the source layout, the task/channel data-flow
+diagram, the `VoiceChannelEvent` wire format, the timing constants table and
+a prose description of the five-second strategy. The short version:
 
-```
-songbird::Driver (DecodeMode::Decode, 48 kHz stereo i16 PCM)
-   |  global event handlers registered in songbird_client/packet_handler.rs
-   |
-   +-- SpeakingStateUpdate ---> ssrc->user_id map, VoiceChannelEvent::UserJoin
-   +-- SpeakingUpdate --------> UserAudioEvent{Speaking|Silent} --> tx_voice_activity
-   +-- VoicePacket -----------> DiscordAudioData{user_id, i16 samples, rtc ts} --> tx_audio_data
-   +-- ClientDisconnect ------> VoiceChannelEvent::UserLeave
-   +-- Driver{Connect,Disconnect,Reconnect} --> VoiceChannelEvent::{Connect,Disconnect,Reconnect}
-
-VoiceActivity (songbird_client/voice_activity.rs)
-   in : tx_voice_activity
-   out: VoiceChannelEvent::ChannelSilent(bool)      (nobody / somebody talking)
-        UserAudioEvent{Speaking|Silent|Idle}         -> tx_silent_user_events
-        Idle fires USER_SILENCE_TIMEOUT (250 ms) after Silent with no new Speaking
-
-UserAudioManager (scrivening/manager.rs)
-   one UserAudioWorker per user_id, created lazily, dropped after 10 min idle
-   forwards audio + events to the right worker
-
-UserAudioWorker (scrivening/worker.rs)          <- the interesting loop
-   AudioBuffer (audio/audio_buffer.rs): 30 s of 16 kHz mono f32, placed by RTP timestamp
-   TranscriptStrategy (strategies/five_second_strategy.rs) decides *when* to run
-     whisper and which segments are "final"
-   Whisper (audio/whisper.rs): spawn_blocking -> whisper_rs full()
-   publishes VoiceChannelEvent::Transcription, then discards the published audio
-   and remembers the last TOKENS_TO_KEEP token ids as the prompt for next time
-
-api_task: drains VoiceChannelEvent channel into the user's callback (JSON printer)
-
-Speaker (audio/speaker.rs): stdin line -> espeakng::speak -> rubato resample
-   22050 -> 48000 -> songbird Input (raw PCM) -> driver.play_only_source
-```
-
-### Key types (`src/model/types.rs`)
-
-`VoiceChannelEvent` is the public API and the JSON wire format. It is a plain
-serde externally-tagged enum, e.g. `{"Transcription":{...}}`,
-`{"ChannelSilent":true}`, `{"UserJoin":1234}`. `Transcription` contains
-`start_timestamp` (`SystemTime`, serialized as
-`{"secs_since_epoch","nanos_since_epoch"}`), `user_id`, `segments`
-(`TextSegment` with `start_offset_ms`/`end_offset_ms` relative to
-`start_timestamp` and `tokens_with_probability`), `audio_duration` and
-`processing_time` (`Duration`, serialized as `{"secs","nanos"}`).
-**oobabot parses this format; treat it as a compatibility contract.** Add
-fields rather than renaming, or version the protocol.
-
-The songbird `ConnectData`/`DisconnectData` types are mirrored by hand here
-purely so they can derive `Serialize`.
-
-### Timing constants (`src/model/constants.rs` and strategy files)
-
-| Constant | Value | Effect |
-|----------|-------|--------|
-| `AUDIO_TO_RECORD` | 30 s | per-user buffer size; audio beyond the window is dropped |
-| `USER_SILENCE_TIMEOUT` | 250 ms | Silent -> Idle delay; also the "silent tail" used to finalize segments |
-| `DISCARD_USER_AUDIO_AFTER` | 10 min | idle worker eviction |
-| `TOKENS_TO_KEEP` | 1024 | previous token ids fed back as whisper prompt |
-| `DONT_EVEN_BOTHER_RMS_THRESHOLD` | 0.01 | audio below this RMS is treated as silence and never sent to whisper |
-| `FIRST_TRANSCRIPT_PERIOD` | 5 s | first whisper run after speech starts |
-| `SUBSEQUENT_TRANSCRIPT_PERIOD` | 1 s | re-run cadence while speech continues |
-| `OUTRAGEOUSLY_MANY_TOKENS` | 100 | segment with this many tokens is discarded as a hallucination |
-
-The doc comments on `TranscriptStrategy::handle_event` (100 ms / 1 s) are
-stale; the constants above are what actually runs.
-
-### The five-second strategy, in words
-
-Whisper is run on the whole per-user buffer 5 s after the user starts
-talking, then every 1 s, and immediately when songbird reports the user went
-silent. Each result is split at (buffer end - 250 ms): segments ending before
-that point are published as final and their audio is discarded; the remainder
-is kept as a "tentative" transcript. If the user then goes Idle without new
-audio, the tentative transcript is published as-is. Whisper output is filtered
-by per-token probability (more low-probability than high-probability tokens
-discards the segment) and by token count.
+- Tokio tasks connected by unbounded mpsc channels, all stopped by one shared
+  `CancellationToken`. `Discrivener::load` in `src/lib.rs` wires everything.
+- Pipeline: songbird event handlers -> `VoiceActivity` (speaking/silent/idle)
+  -> `UserAudioManager` -> one `UserAudioWorker` per user (30 s
+  `AudioBuffer` + `FiveSecondStrategy` + whisper) -> `VoiceChannelEvent` ->
+  caller's callback. TTS is a separate `Speaker` task (espeak-ng -> rubato
+  -> songbird).
+- **`VoiceChannelEvent`'s serde JSON (`src/model/types.rs`) is a
+  compatibility contract with oobabot.** Add fields rather than renaming, or
+  version the protocol.
+- Tunables live in `src/model/constants.rs` and
+  `src/strategies/five_second_strategy.rs` (plus `OUTRAGEOUSLY_MANY_TOKENS`
+  in `src/scrivening/worker.rs`). The 100 ms / 1 s figures in the
+  `TranscriptStrategy::handle_event` doc comments are stale.
 
 ## Threading and safety notes
 
@@ -177,7 +111,7 @@ discards the segment) and by token count.
   (i16 -> bytes) and the espeak-ng FFI. **The `Bytes::from(slice)` calls in
   `get_bytes` and `VecMediaSource::new` do not copy** (the raw slice gets an
   inferred `'static` lifetime), so those `Bytes` alias memory that is later
-  mutated or freed. See TODO.md, item 1. Do not build on this pattern.
+  mutated or freed. See `TODO.md`, item 1. Do not build on this pattern.
 - espeak-ng is a process-wide singleton behind a `lazy_static` mutex;
   `speak()` asserts no other synthesis is in flight. Only `Speaker` calls it.
 - The `Drop` impl on `UserAudioWorker` cancels its token, and that token is a
@@ -193,7 +127,7 @@ discards the segment) and by token count.
   `types.rs` (`split_at_end_time`). Run with `cargo test`.
 - `tests/test.json` is 1.1 MB of captured songbird events (SpeakingStateUpdate,
   SpeakingUpdate, VoicePacket with decoded audio). Nothing reads it today; it
-  is the natural fixture for a replay harness (see TODO.md).
+  is the natural fixture for a replay harness (see `TODO.md`).
 - There are no integration tests and nothing exercises whisper or espeak-ng
   under `cargo test`. Verifying transcription changes means running an example
   against a real voice channel or building the replay harness first.
@@ -225,7 +159,7 @@ discards the segment) and by token count.
   receive behind the `receive` feature, and replaced the `Reader`/`Codec`
   input API with symphonia-based `Input` + `RawAdapter`. 0.6 adds DAVE
   end-to-end encryption and moves from `audiopus` to `opus2`. This is the
-  largest migration in the codebase; see VOICE-UPDATES.md, Phase 0.
+  largest migration in the codebase; see `docs/VOICE-UPDATES.md`, Phase 0.
 - whisper-rs 0.16 replaced `WhisperContext::new` with `new_with_params`,
   renamed `set_suppress_non_speech_tokens` to `set_suppress_nst`, and moved
   segment/token access to `WhisperState::get_segment` / `as_iter()` returning
